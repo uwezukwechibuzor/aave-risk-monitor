@@ -1,0 +1,107 @@
+syntax = "proto3";
+package sf.substreams.rpc.v2;
+option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/rpc/v2;pbrpcv2";
+
+import "google/protobuf/any.proto";
+import "sf/substreams/v1/clock.proto";
+import "sf/substreams/v1/modules.proto";
+
+service Stream {
+  rpc Blocks(Request) returns (stream Response);
+}
+
+message Request {
+  int64 start_block_num = 1;
+  string start_cursor = 2;
+  uint64 stop_block_num = 3;
+  sf.substreams.v1.Package modules = 4;
+  string output_module = 7;
+  bool production_mode = 10;
+  repeated ForkStep fork_steps = 11;
+  string debug_initial_store_snapshot_for_modules = 12;
+  repeated string debug_modules_output_cache_save_interval = 13;
+  string network = 15;
+  repeated string params = 16;
+}
+
+enum ForkStep {
+  STEP_UNKNOWN = 0;
+  STEP_NEW = 1;
+  STEP_UNDO = 2;
+  STEP_IRREVERSIBLE = 4;
+}
+
+message Response {
+  oneof message {
+    BlockScopedData block_scoped_data = 1;
+    BlockUndoSignal block_undo_signal = 2;
+    ModulesProgress progress = 3;
+    InitialSnapshotData debug_snapshot_data = 4;
+    InitialSnapshotComplete debug_snapshot_complete = 5;
+    Session session = 6;
+  }
+}
+
+message Session {
+  string id = 1;
+  uint64 resolved_start_block = 2;
+  uint64 linear_handoff_block = 3;
+  uint64 max_parallel_workers = 4;
+  string trace_id = 5;
+}
+
+message BlockScopedData {
+  google.protobuf.Any output = 1;
+  sf.substreams.v1.Clock clock = 6;
+  string cursor = 10;
+  uint64 final_block_height = 11;
+}
+
+message BlockUndoSignal {
+  sf.substreams.v1.BlockRef last_valid_block = 1;
+  string last_valid_cursor = 2;
+}
+
+message ModulesProgress {
+  repeated ModuleProgress modules = 1;
+}
+
+message ModuleProgress {
+  string name = 1;
+  oneof type {
+    ProcessedRanges processed_ranges = 2;
+    InitialState initial_state = 3;
+    ProcessedBytes processed_bytes = 4;
+    Failed failed = 5;
+  }
+  message ProcessedRanges { repeated BlockRange processed_ranges = 1; }
+  message InitialState { uint64 available_up_to_block = 2; }
+  message ProcessedBytes {
+    uint64 total_bytes_read = 1;
+    uint64 total_bytes_written = 2;
+    uint64 bytes_read_delta = 3;
+    uint64 bytes_written_delta = 4;
+    uint64 nano_seconds_delta = 5;
+  }
+  message Failed {
+    string reason = 1;
+    repeated string logs = 2;
+    bool logs_truncated = 3;
+  }
+}
+
+message BlockRange {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+
+message InitialSnapshotData {
+  string module_name = 1;
+  bytes deltas = 2;
+  uint64 sent_keys = 4;
+  uint64 total_keys = 3;
+}
+
+message InitialSnapshotComplete {
+  string cursor = 1;
+}

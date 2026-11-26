@@ -1,5 +1,5 @@
-.PHONY: install up down migrate backfill index snapshot signals backtest api test lint \
-        contracts-test reset fmt typecheck reconcile
+.PHONY: install up down migrate backfill substreams-backfill index snapshot signals backtest api \
+        test lint contracts-test reset fmt typecheck reconcile gen-proto
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 install:
@@ -32,6 +32,18 @@ reset:
 # ── Data pipeline ─────────────────────────────────────────────────────────────
 backfill:
 	python -m risk.cmd.backfill
+
+substreams-backfill:
+	python -m risk.cmd.substreams_backfill
+
+gen-proto:
+	python -m grpc_tools.protoc -I proto \
+	  -I "$$(python -c 'import grpc_tools,os; print(os.path.dirname(grpc_tools.__file__))')/_proto" \
+	  --python_out=risk/proto --grpc_python_out=risk/proto \
+	  proto/sf/substreams/rpc/v2/service.proto \
+	  proto/sf/substreams/v1/clock.proto \
+	  proto/sf/substreams/v1/modules.proto \
+	  proto/sf/ethereum/type/v2/type.proto
 
 index:
 	python -m risk.cmd.index

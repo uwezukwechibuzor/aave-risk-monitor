@@ -1,0 +1,57 @@
+syntax = "proto3";
+package sf.substreams.v1;
+option go_package = "github.com/streamingfast/substreams/pb/sf/substreams/v1;pbsubstreams";
+
+message Package {
+  uint64 version = 5;
+  Modules modules = 6;
+  repeated ModuleMeta module_meta = 7;
+  repeated PackageMeta package_meta = 8;
+  bytes network = 9; // unused, use network field in Request
+  string network_string = 12;
+}
+
+message Modules {
+  repeated Module modules = 1;
+}
+
+message Module {
+  string name = 1;
+  oneof kind {
+    KindMap kind_map = 2;
+    KindStore kind_store = 3;
+  }
+  uint32 binary_index = 4;
+  string binary_entrypoint = 5;
+  repeated Input inputs = 6;
+  Output output = 7;
+  uint64 initial_block = 8;
+  string block_filter = 10;
+}
+
+message KindMap { string output_type = 1; }
+message KindStore {
+  string value_type = 1;
+  string update_policy = 2;
+}
+message Input {
+  oneof input {
+    Source source = 1;
+    Map map = 2;
+    Store store = 3;
+    Params params = 4;
+  }
+  message Source { string type = 1; }
+  message Map { string module_name = 1; }
+  message Store { string module_name = 1; uint32 mode = 2; }
+  message Params { string value = 1; }
+}
+message Output { string type = 1; }
+message Binary { string type = 1; bytes content = 2; }
+message ModuleMeta { string package_name = 1; string doc = 2; }
+message PackageMeta {
+  string name = 1;
+  string version = 2;
+  string url = 3;
+  string doc = 4;
+}
