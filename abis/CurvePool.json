@@ -1,0 +1,32 @@
+[
+  {
+    "inputs": [
+      {"name": "i", "type": "int128"},
+      {"name": "j", "type": "int128"},
+      {"name": "dx", "type": "uint256"}
+    ],
+    "name": "get_dy",
+    "outputs": [{"name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"name": "i", "type": "uint256"}],
+    "name": "balances",
+    "outputs": [{"name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "name": "buyer", "type": "address"},
+      {"indexed": false, "name": "sold_id", "type": "int128"},
+      {"indexed": false, "name": "tokens_sold", "type": "uint256"},
+      {"indexed": false, "name": "bought_id", "type": "int128"},
+      {"indexed": false, "name": "tokens_bought", "type": "uint256"}
+    ],
+    "name": "TokenExchange",
+    "type": "event"
+  }
+]

@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: risk
+      POSTGRES_PASSWORD: risk
+      POSTGRES_DB: risk
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U risk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://risk:risk@postgres:5432/risk
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "uvicorn", "risk.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://risk:risk@postgres:5432/risk
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "risk.cmd.index"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://risk:risk@postgres:5432/risk
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command: ["python", "-m", "risk.cmd.worker"]
+
+volumes:
+  pgdata:

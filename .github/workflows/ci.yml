@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev]"
+      - name: Ruff lint
+        run: ruff check risk/ tests/
+      - name: Ruff format check
+        run: ruff format --check risk/ tests/
+      - name: Mypy
+        run: mypy risk/ --ignore-missing-imports
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: risk
+          POSTGRES_PASSWORD: risk
+          POSTGRES_DB: risk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://risk:risk@localhost:5432/risk
+      GRAPHOPS_API_KEY: ""
+      GRAPHOPS_RPC_URL: "https://mainnet.gateway.tenderly.co"
+      GRAPHOPS_SUBSTREAMS_ENDPOINT: "mainnet.eth.streamingfast.io:443"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev]"
+      - name: Run migrations
+        run: python -m risk.db.migrate
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  foundry-tests:
+    name: Foundry Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Build contracts
+        run: cd contracts && forge build
+      - name: Run tests
+        run: cd contracts && forge test -vv
+        env:
+          # Fork test requires a real RPC; skip if key is absent
+          ETH_RPC_URL: ${{ secrets.GRAPHOPS_RPC_URL || 'https://mainnet.gateway.tenderly.co' }}
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t aave-risk-monitor:ci .

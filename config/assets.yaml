@@ -1,0 +1,74 @@
+# Monitored assets in Aave v3 Ethereum Core market.
+# Addresses from bgd-labs/aave-address-book (AaveV3Ethereum namespace).
+# Source: https://github.com/bgd-labs/aave-address-book/blob/main/src/AaveV3Ethereum.sol
+assets:
+  wstETH:
+    symbol: wstETH
+    address: "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"
+    decimals: 18
+    # aToken: aEthwstETH
+    atoken_address: "0x0B925eD163218f6662a35e0f0371Ac234f9E9371"
+    # Variable debt token: variableDebtEthwstETH
+    variable_debt_address: "0xC96113eED8cAB59cD8A66813bCB0cEb29F06D2e4"
+    # Chainlink aggregator via AaveOracle (resolved on-chain)
+    # wstETH/USD - exchange rate based adapter
+    oracle_type: exchange_rate  # uses wstETH/stETH rate + stETH/USD
+    # DEX pools for liquidity checks
+    dex_pools:
+      uniswap_v3:
+        # wstETH/WETH 0.01% fee tier - official Uniswap pool
+        - address: "0x109830a1AAaD605BbF02a9dFA7a0eDEd451E96ff"
+          token0: "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"  # wstETH
+          token1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"  # WETH
+          fee: 100
+      curve:
+        # wstETH/ETH Curve pool (stableswap-ng)
+        - address: "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022"
+          # TODO(verify): confirm this is wstETH pool vs stETH pool
+
+  weETH:
+    symbol: weETH
+    address: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
+    decimals: 18
+    atoken_address: "0xBdfa7b7893081B35Fb54027489d6a3cA4cF3bb16"
+    variable_debt_address: "0x3D3efceb4Ff0966D34d9545D3A2fa2dcdBf451f2"
+    oracle_type: exchange_rate  # weETH/eETH rate + eETH/ETH
+    dex_pools:
+      uniswap_v3:
+        # weETH/WETH 0.05% fee tier
+        - address: "0x7A415B19932c0105c82FDB6b720bb01B0CC2CAe3"
+          token0: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"  # weETH
+          token1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"  # WETH
+          fee: 500
+      curve:
+        []  # TODO(verify): weETH Curve pool address
+
+  USDC:
+    symbol: USDC
+    address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    decimals: 6
+    atoken_address: "0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c"
+    variable_debt_address: "0x72E95b8931767C79bA4EeE721354d6E99a61D004"
+    oracle_type: fixed  # USDC/USD ~ 1.0
+    dex_pools:
+      uniswap_v3:
+        # USDC/WETH 0.05% fee tier
+        - address: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
+          token0: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # USDC
+          token1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"  # WETH
+          fee: 500
+      curve:
+        []
+
+# E-mode categories (Aave v3 Ethereum)
+# Source: Aave governance / on-chain AaveProtocolDataProvider
+emode_categories:
+  1:
+    label: "ETH Correlated"
+    assets: ["wstETH", "weETH", "WETH"]
+    ltv: 9000      # 90%
+    liquidation_threshold: 9300  # 93%
+    liquidation_bonus: 10100     # 101% (1% bonus)
+
+# WETH address (used in e-mode and DEX)
+weth_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aave Collateral Stress Monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #21262d;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --warn: #d29922;
+    --crit: #f85149;
+    --ok: #3fb950;
+    --font: 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; }
+
+  header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; font-weight: 600; color: var(--accent); }
+  .header-stats { display: flex; gap: 24px; font-size: 12px; color: var(--text-muted); }
+  .header-stats span { display: flex; align-items: center; gap: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot-ok { background: var(--ok); }
+  .dot-warn { background: var(--warn); }
+  .dot-crit { background: var(--crit); }
+
+  main { padding: 20px 24px; display: grid; gap: 20px; max-width: 1600px; margin: 0 auto; }
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
+  .card h2 small { color: var(--text-muted); font-weight: 400; margin-left: 8px; }
+
+  .toggle-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .toggle-btn {
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .toggle-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+
+  .chart { width: 100%; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; padding: 6px 10px; background: var(--bg3); color: var(--text-muted);
+       border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: var(--bg3); }
+
+  .badge {
+    display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 500;
+  }
+  .badge-ok { background: #1a3a2a; color: var(--ok); }
+  .badge-warn { background: #2d2200; color: var(--warn); }
+  .badge-crit { background: #2d1a1a; color: var(--crit); }
+
+  #refresh-countdown { font-size: 11px; color: var(--text-muted); }
+  .loading { text-align: center; color: var(--text-muted); padding: 40px; }
+  .error { color: var(--crit); font-size: 12px; padding: 8px; }
+
+  @media (max-width: 900px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Aave Collateral Stress Monitor</h1>
+  <div class="header-stats">
+    <span id="hdr-block">Block: —</span>
+    <span id="hdr-finality">Finality: —</span>
+    <span id="hdr-lag">Lag: —</span>
+    <span id="hdr-snapshot">Last snapshot: —</span>
+    <span id="refresh-countdown">Refresh in 60s</span>
+  </div>
+</header>
+
+<main>
+  <!-- Hero: Liquidation-at-Risk heatmap -->
+  <div class="card">
+    <h2>Liquidation-at-Risk Heatmap <small>USD at risk per shock level</small></h2>
+    <div class="toggle-row">
+      <button class="toggle-btn active" onclick="switchScenario('asset_depeg', this)">Asset Depeg</button>
+      <button class="toggle-btn" onclick="switchScenario('market_wide', this)">Market-Wide</button>
+    </div>
+    <div id="heatmap-lar" class="chart" style="height:220px;"></div>
+  </div>
+
+  <div class="grid-2">
+    <!-- Health Factor heatmap -->
+    <div class="card">
+      <h2>Health Factor Distribution <small>Debt by HF band over time</small></h2>
+      <div id="heatmap-hf" class="chart" style="height:240px;"></div>
+    </div>
+    <!-- Oracle Deviation heatmap -->
+    <div class="card">
+      <h2>Oracle Deviation <small>Median basis points by hour (UTC)</small></h2>
+      <div id="heatmap-oracle" class="chart" style="height:240px;"></div>
+    </div>
+  </div>
+
+  <!-- Coverage panel -->
+  <div class="card">
+    <h2>DEX Coverage <small>Capacity vs liquidatable collateral (-20% shock)</small></h2>
+    <div id="chart-coverage" class="chart" style="height:200px;"></div>
+  </div>
+
+  <div class="grid-2">
+    <!-- Active Alerts -->
+    <div class="card">
+      <h2>Active Alerts</h2>
+      <div id="alerts-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- Latest Signals -->
+    <div class="card">
+      <h2>Latest Signal Values</h2>
+      <div id="signals-table"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- Backtest summary -->
+  <div class="card">
+    <h2>Backtest Summary <small>Historical fire rates and recommended thresholds</small></h2>
+    <div id="backtest-table"><div class="loading">Loading…</div></div>
+  </div>
+</main>
+
+<script>
+const BASE = '';
+let currentScenario = 'asset_depeg';
+let countdown = 60;
+
+const charts = {
+  lar: echarts.init(document.getElementById('heatmap-lar'), 'dark'),
+  hf: echarts.init(document.getElementById('heatmap-hf'), 'dark'),
+  oracle: echarts.init(document.getElementById('heatmap-oracle'), 'dark'),
+  coverage: echarts.init(document.getElementById('chart-coverage'), 'dark'),
+};
+
+Object.values(charts).forEach(c => c.resize());
+window.addEventListener('resize', () => Object.values(charts).forEach(c => c.resize()));
+
+async function fetchJSON(url) {
+  const r = await fetch(BASE + url);
+  if (!r.ok) throw new Error(r.statusText);
+  return r.json();
+}
+
+function fmtUSD(v) {
+  if (!v) return '$0';
+  const n = parseFloat(v);
+  if (n >= 1e9) return '$' + (n/1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
+  return '$' + n.toFixed(2);
+}
+
+function fmtRatio(v) {
+  if (v === null || v === undefined) return '—';
+  return parseFloat(v).toFixed(3) + 'x';
+}
+
+function severityBadge(s) {
+  const cls = s === 'critical' ? 'badge-crit' : (s === 'warning' ? 'badge-warn' : 'badge-ok');
+  return `<span class="badge ${cls}">${s}</span>`;
+}
+
+// ── Health state ──────────────────────────────────────────────────────────────
+async function loadHealth() {
+  try {
+    const h = await fetchJSON('/health');
+    document.getElementById('hdr-lag').textContent =
+      h.indexer_lag_blocks != null ? `Lag: ${h.indexer_lag_blocks} blocks` : 'Lag: —';
+    document.getElementById('hdr-finality').innerHTML =
+      `<span class="dot ${h.rpc_ok ? 'dot-ok' : 'dot-crit'}"></span>RPC`;
+  } catch(e) {
+    document.getElementById('hdr-lag').textContent = 'Lag: error';
+  }
+}
+
+// ── Latest snapshot block ─────────────────────────────────────────────────────
+async function loadLatestBlock() {
+  try {
+    const sv = await fetchJSON('/signals/latest');
+    if (sv.signals && sv.signals.length) {
+      const maxBlock = Math.max(...sv.signals.map(s => s.block));
+      document.getElementById('hdr-block').textContent = `Block: ${maxBlock.toLocaleString()}`;
+      document.getElementById('hdr-snapshot').textContent =
+        `Snapshot: ${new Date(sv.signals[0].ts).toLocaleTimeString()}`;
+    }
+  } catch(e) {}
+}
+
+// ── Liquidation-at-risk heatmap ───────────────────────────────────────────────
+async function loadLarHeatmap(scenario) {
+  try {
+    const d = await fetchJSON(`/heatmap/liquidation?scenario=${scenario}`);
+    const data = [];
+    d.cells.forEach(c => {
+      data.push([c.col, c.row, parseFloat(c.value)]);
+    });
+    const maxVal = Math.max(1, ...data.map(d => d[2]));
+
+    charts.lar.setOption({
+      backgroundColor: 'transparent',
+      tooltip: {
+        formatter: p => `${p.data[1]} @ ${p.data[0]}<br>${fmtUSD(p.data[2])} at risk`,
+      },
+      grid: { top: 10, right: 80, bottom: 30, left: 80 },
+      xAxis: { type: 'category', data: d.cols, axisLabel: { color: '#8b949e' } },
+      yAxis: { type: 'category', data: d.rows, axisLabel: { color: '#8b949e' } },
+      visualMap: {
+        min: 0, max: maxVal,
+        calculable: true,
+        orient: 'vertical',
+        right: 0, top: 10, bottom: 10,
+        inRange: { color: ['#0d1117', '#1a3a5c', '#58a6ff', '#d29922', '#f85149'] },
+        text: ['High', 'Low'],
+        textStyle: { color: '#8b949e' },
+      },
+      series: [{
+        name: 'LaR',
+        type: 'heatmap',
+        data: data,
+        label: { show: true, formatter: p => fmtUSD(p.data[2]), fontSize: 10, color: '#c9d1d9' },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
+      }],
+    });
+  } catch(e) {
+    document.getElementById('heatmap-lar').innerHTML = `<div class="error">Failed: ${e.message}</div>`;
+  }
+}
+
+// ── Health factor heatmap ─────────────────────────────────────────────────────
+async function loadHfHeatmap() {
+  try {
+    const d = await fetchJSON('/heatmap/health-factor?days=30');
+    const data = d.cells.map(c => [c.col, c.row, parseFloat(c.value)]);
+    const maxVal = Math.max(1, ...data.map(d => d[2]));
+
+    charts.hf.setOption({
+      backgroundColor: 'transparent',
+      tooltip: { formatter: p => `${p.data[1]}<br>${p.data[0]}: ${fmtUSD(p.data[2])} debt` },
+      grid: { top: 10, right: 80, bottom: 60, left: 70 },
+      xAxis: { type: 'category', data: d.cols, axisLabel: { color: '#8b949e', rotate: 45, fontSize: 10 } },
+      yAxis: { type: 'category', data: d.rows, axisLabel: { color: '#8b949e', fontSize: 10 } },
+      visualMap: {
+        min: 0, max: maxVal,
+        orient: 'vertical', right: 0, top: 10, bottom: 10,
+        inRange: { color: ['#0d1117', '#1a3a5c', '#58a6ff', '#f85149'] },
+        text: ['High', ''], textStyle: { color: '#8b949e' },
+      },
+      series: [{ type: 'heatmap', data: data }],
+    });
+  } catch(e) {}
+}
+
+// ── Oracle deviation heatmap ──────────────────────────────────────────────────
+async function loadOracleHeatmap() {
+  try {
+    const d = await fetchJSON('/heatmap/oracle-deviation?days=30');
+    const data = d.cells.map(c => [c.col, c.row, parseFloat(c.value)]);
+    const maxAbs = Math.max(1, ...data.map(d => Math.abs(d[2])));
+
+    charts.oracle.setOption({
+      backgroundColor: 'transparent',
+      tooltip: { formatter: p => `${p.data[1]} hour ${p.data[0]}: ${parseFloat(p.data[2]).toFixed(1)} bps` },
+      grid: { top: 10, right: 80, bottom: 30, left: 70 },
+      xAxis: { type: 'category', data: d.cols, name: 'Hour (UTC)', nameLocation: 'center',
+               nameGap: 25, nameTextStyle: { color: '#8b949e' },
+               axisLabel: { color: '#8b949e', fontSize: 10 } },
+      yAxis: { type: 'category', data: d.rows, axisLabel: { color: '#8b949e', fontSize: 10 } },
+      visualMap: {
+        min: -maxAbs, max: maxAbs,
+        orient: 'vertical', right: 0, top: 10, bottom: 10,
+        inRange: { color: ['#f85149', '#0d1117', '#3fb950'] },
+        text: ['+bps', '-bps'], textStyle: { color: '#8b949e' },
+      },
+      series: [{ type: 'heatmap', data: data }],
+    });
+  } catch(e) {}
+}
+
+// ── Coverage bar chart ────────────────────────────────────────────────────────
+async function loadCoverageChart() {
+  try {
+    const sv = await fetchJSON('/signals/latest');
+    const cov2 = {}, cov5 = {}, lar = {};
+    sv.signals.forEach(s => {
+      if (s.signal === 'coverage_ratio' && s.scenario === '2pct') cov2[s.asset] = parseFloat(s.value);
+      if (s.signal === 'coverage_ratio' && s.scenario === '5pct') cov5[s.asset] = parseFloat(s.value);
+      if (s.signal === 'liquidation_at_risk' && s.scenario.startsWith('asset_depeg:-0.2'))
+        lar[s.asset] = parseFloat(s.value);
+    });
+
+    const assets = [...new Set(sv.signals.map(s => s.asset))];
+    charts.coverage.setOption({
+      backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis' },
+      legend: { textStyle: { color: '#8b949e' }, top: 0 },
+      grid: { top: 40, bottom: 30, left: 60, right: 20 },
+      xAxis: { type: 'category', data: assets, axisLabel: { color: '#8b949e' } },
+      yAxis: { type: 'value', axisLabel: { color: '#8b949e' },
+               name: 'Coverage ratio', nameTextStyle: { color: '#8b949e' } },
+      series: [
+        { name: '2% impact', type: 'bar', data: assets.map(a => cov2[a] ?? 0),
+          itemStyle: { color: '#58a6ff' } },
+        { name: '5% impact', type: 'bar', data: assets.map(a => cov5[a] ?? 0),
+          itemStyle: { color: '#3fb950' } },
+        // Red line at coverage=1
+        { name: 'Coverage = 1', type: 'line', markLine: {
+            data: [{ yAxis: 1, lineStyle: { color: '#f85149', type: 'dashed' } }] },
+          data: [], showSymbol: false },
+      ],
+    });
+  } catch(e) {}
+}
+
+// ── Alerts table ──────────────────────────────────────────────────────────────
+async function loadAlerts() {
+  const el = document.getElementById('alerts-table');
+  try {
+    const d = await fetchJSON('/alerts');
+    if (!d.alerts.length) { el.innerHTML = '<div class="loading">No alerts</div>'; return; }
+    el.innerHTML = `<table>
+      <tr><th>Severity</th><th>Asset</th><th>Signal</th><th>Message</th><th>Block</th><th>Time</th></tr>
+      ${d.alerts.slice(0,20).map(a => `<tr>
+        <td>${severityBadge(a.severity)}</td>
+        <td>${a.asset}</td>
+        <td>${a.signal}</td>
+        <td>${a.message.split('\n')[0]}</td>
+        <td>${a.block.toLocaleString()}</td>
+        <td>${new Date(a.ts).toLocaleTimeString()}</td>
+      </tr>`).join('')}
+    </table>`;
+  } catch(e) {
+    el.innerHTML = `<div class="error">Failed: ${e.message}</div>`;
+  }
+}
+
+// ── Signals table ─────────────────────────────────────────────────────────────
+async function loadSignals() {
+  const el = document.getElementById('signals-table');
+  try {
+    const d = await fetchJSON('/signals/latest');
+    if (!d.signals.length) { el.innerHTML = '<div class="loading">No signals</div>'; return; }
+    el.innerHTML = `<table>
+      <tr><th>Signal</th><th>Asset</th><th>Scenario</th><th>Value</th><th>Threshold</th><th>Fired</th></tr>
+      ${d.signals.slice(0,30).map(s => `<tr>
+        <td>${s.signal}</td>
+        <td>${s.asset}</td>
+        <td>${s.scenario}</td>
+        <td>${parseFloat(s.value).toFixed(4)}</td>
+        <td>${parseFloat(s.threshold).toFixed(4)}</td>
+        <td>${s.fired ? '<span class="badge badge-crit">YES</span>' : '<span class="badge badge-ok">no</span>'}</td>
+      </tr>`).join('')}
+    </table>`;
+  } catch(e) {
+    el.innerHTML = `<div class="error">Failed: ${e.message}</div>`;
+  }
+}
+
+// ── Backtest table ────────────────────────────────────────────────────────────
+async function loadBacktest() {
+  const el = document.getElementById('backtest-table');
+  try {
+    const d = await fetchJSON('/backtest/summary');
+    if (!d.summaries.length) { el.innerHTML = '<div class="loading">No backtest data</div>'; return; }
+    el.innerHTML = `<table>
+      <tr><th>Signal</th><th>Asset</th><th>Scenario</th><th>Fire rate</th><th>p50</th><th>p95</th><th>Rec. threshold</th></tr>
+      ${d.summaries.map(s => `<tr>
+        <td>${s.signal}</td>
+        <td>${s.asset}</td>
+        <td>${s.scenario}</td>
+        <td>${(parseFloat(s.fire_rate)*100).toFixed(1)}%</td>
+        <td>${parseFloat(s.p50).toFixed(4)}</td>
+        <td>${parseFloat(s.p95).toFixed(4)}</td>
+        <td>${parseFloat(s.recommended_threshold).toFixed(4)}</td>
+      </tr>`).join('')}
+    </table>`;
+  } catch(e) {
+    el.innerHTML = `<div class="error">Failed: ${e.message}</div>`;
+  }
+}
+
+function switchScenario(scenario, btn) {
+  currentScenario = scenario;
+  document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadLarHeatmap(scenario);
+}
+
+async function refresh() {
+  await Promise.all([
+    loadHealth(),
+    loadLatestBlock(),
+    loadLarHeatmap(currentScenario),
+    loadHfHeatmap(),
+    loadOracleHeatmap(),
+    loadCoverageChart(),
+    loadAlerts(),
+    loadSignals(),
+    loadBacktest(),
+  ]);
+}
+
+// Auto-refresh countdown
+setInterval(() => {
+  countdown--;
+  document.getElementById('refresh-countdown').textContent = `Refresh in ${countdown}s`;
+  if (countdown <= 0) {
+    countdown = 60;
+    refresh();
+  }
+}, 1000);
+
+// Initial load
+refresh();
+</script>
+</body>
+</html>

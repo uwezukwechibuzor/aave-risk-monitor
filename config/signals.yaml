@@ -1,0 +1,39 @@
+# Signal thresholds.  Values here are defaults; each signal module reads
+# its own section at startup.  Tune based on backtest noise analysis.
+
+liquidation_at_risk:
+  # Minimum liquidatable debt (USD) to fire an alert
+  warning_threshold_usd: 1_000_000    # $1M
+  critical_threshold_usd: 10_000_000  # $10M
+  # Shock levels evaluated (fractional, negative = price drop)
+  shocks: [-0.05, -0.10, -0.20, -0.30]
+  # Health factor below which 100% close factor applies (Aave v3 default)
+  full_close_factor_hf_threshold: 0.95
+
+coverage_ratio:
+  # Coverage ratio (DEX capacity / liquidatable collateral) below which alert fires
+  warning_threshold: 1.0   # capacity < debt: not fully absorbable on-chain
+  critical_threshold: 0.5  # less than half covered
+  # Price impact tolerance for DEX capacity quotes
+  impact_levels: [0.02, 0.05]  # 2% and 5%
+
+oracle_deviation:
+  # Deviation from DEX market price in basis points
+  warning_threshold_bps: 100   # 1%
+  critical_threshold_bps: 300  # 3%
+  # TWAP window in seconds
+  twap_window_seconds: 1800
+
+concentration:
+  # Top-10 wallet share to fire
+  warning_threshold_pct: 30.0   # 30% held by top-10
+  critical_threshold_pct: 50.0  # 50% held by top-10
+
+utilization:
+  # Reserve utilization (fractional)
+  warning_threshold: 0.85
+  critical_threshold: 0.95
+  # Cap headroom (remaining capacity / cap)
+  cap_headroom_warning: 0.10  # < 10% headroom
+
+alert_cooldown_seconds: 21600  # 6 hours default per signal+asset combo

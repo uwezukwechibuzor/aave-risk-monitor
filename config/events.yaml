@@ -1,0 +1,20 @@
+# Known market-stress events for backtesting context.
+# Each entry MUST have a source URL to a primary source.
+# If no verifiable event falls within the backfill window, leave the list
+# empty with a TODO(verify) comment.
+#
+# TODO(verify): Populate with events from the actual 90-day backfill window
+# once backfill is complete.  Sources to check:
+#   - Aave governance forum: https://governance.aave.com
+#   - LlamaRisk research: https://llamarisk.com
+#   - Protocol incident reports in Aave GitHub
+#
+# Example format:
+# events:
+#   - date: "2024-11-13"
+#     label: "wstETH oracle deviation spike"
+#     description: "Temporary deviation between wstETH oracle and Curve spot"
+#     source: "https://governance.aave.com/t/..."
+#     assets_affected: ["wstETH"]
+
+events: []
