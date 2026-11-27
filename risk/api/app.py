@@ -603,6 +603,40 @@ async def recent_activity(limit: int = Query(50, ge=10, le=200)) -> dict[str, An
     pool = get_pool()
     assets_cfg = load_assets_config()
     sym_map = _sym_map(assets_cfg)
+    # address → decimals for unit conversion of raw uint256 amounts.
+    # Seed from our monitored asset config, then override well-known non-18-decimal tokens.
+    dec_map: dict[str, int] = {
+        v["address"].lower(): v.get("decimals", 18)
+        for v in assets_cfg.get("assets", {}).values()
+    }
+    # Common Aave-listed tokens with non-18 decimals not in our monitored config
+    dec_map.update({
+        "0xdac17f958d2ee523a2206206994597c13d831ec7": 6,   # USDT
+        "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": 8,   # WBTC
+        "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": 8,   # cbBTC
+    })
+    # Extend sym_map with well-known Aave-listed tokens for a readable activity feed
+    sym_map.update({
+        "0xdac17f958d2ee523a2206206994597c13d831ec7": "USDT",
+        "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": "WBTC",
+        "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": "cbBTC",
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH",
+        "0x6b175474e89094c44da98b954eedeac495271d0f": "DAI",
+        "0x514910771af9ca656af840dff83e8264ecf986ca": "LINK",
+        "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9": "AAVE",
+        "0xba100000625a3754423978a60c9317c58a424e3d": "BAL",
+        "0xd533a949740bb3306d119cc777fa900ba034cd52": "CRV",
+        "0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2": "MKR",
+        "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984": "UNI",
+        "0xae78736cd615f374d3085123a210448e74fc6393": "rETH",
+        "0xbe9895146f7af43049ca1c1ae358b0541ea49704": "cbETH",
+        "0xbf5495efe5db9ce00f80364c8b423567e58d2110": "ezETH",
+        "0x853d955acef822db058eb8505911ed77f175b99e": "FRAX",
+        "0x5f98805a4e8be255a32880fdec7f6728c6568ba0": "LUSD",
+        "0x9d39a5de30e57443bff2a8307a4256c8797a3497": "USDE",
+        "0x4c9edd5852cd905f086c759e8383e09bff1e68b3": "USDe",
+        "0x6c3ea9036406852006290770bedfcaba0e23a0e8": "PYUSD",
+    })
 
     async with pool.acquire() as conn:
         ref = await conn.fetchrow(
@@ -642,7 +676,8 @@ async def recent_activity(limit: int = Query(50, ge=10, le=200)) -> dict[str, An
                 "event_type":   r["etype"],
                 "reserve":      sym_map.get(r["reserve"].lower(), r["reserve"][:10]),
                 "user":         r["user"],
-                "amount":       _fmt(r["amount"]),
+                # Convert raw uint256 → human token amount (divide by 10^decimals)
+                "amount":       _fmt(r["amount"]) / (10 ** dec_map.get(r["reserve"].lower(), 18)),
                 "timestamp":    r["approx_ts"].isoformat() if r["approx_ts"] else "",
             }
             for r in rows

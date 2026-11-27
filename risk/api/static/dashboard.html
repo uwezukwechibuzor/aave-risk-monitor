@@ -357,7 +357,7 @@ tr:hover td{background:#161820}
   <div class="table-panel">
     <div class="table-header"><span class="table-title">Alert Feed</span></div>
     <table>
-      <thead><tr><th>Severity</th><th>Signal</th><th>Asset</th><th>Scenario</th><th>Message</th><th>Block</th><th>Time</th><th>Status</th></tr></thead>
+      <thead><tr><th>Severity</th><th>Signal</th><th>Asset</th><th>Scenario</th><th>Value</th><th>Threshold</th><th>Time</th><th>Status</th></tr></thead>
       <tbody id="alerts-tbody"></tbody>
     </table>
   </div>
@@ -434,7 +434,7 @@ tr:hover td{background:#161820}
   <div class="table-panel">
     <div class="table-header"><span class="table-title">Latest Protocol Events</span></div>
     <table>
-      <thead><tr><th>Block</th><th>Type</th><th>Asset</th><th>User</th><th>Amount (raw)</th><th>Time (approx)</th><th>Tx</th></tr></thead>
+      <thead><tr><th>Block</th><th>Type</th><th>Asset</th><th>User</th><th>Amount</th><th>Time (approx)</th><th>Tx</th></tr></thead>
       <tbody id="activity-tbody"></tbody>
     </table>
   </div>
@@ -446,6 +446,25 @@ tr:hover td{background:#161820}
 const COLORS=['#4285f4','#34a853','#fbbc04','#ea4335','#a142f4','#00bcd4','#ff7043','#26a69a'];
 
 function fmt$(v,d=1){if(v===null||v===undefined)return'–';const n=Number(v);if(n>=1e9)return'$'+(n/1e9).toFixed(d)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(d)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(d)+'K';return'$'+n.toFixed(2)}
+function parseAlertField(msg,field){const m=msg.match(new RegExp(field+':\\s*([\\-\\d.]+)'));return m?m[1]:null;}
+function fmtSignalName(s){return{'liquidation_at_risk':'Liq. at Risk','oracle_deviation':'Oracle Dev.','coverage_ratio':'Coverage Ratio','concentration':'Concentration'}[s]||s.replace(/_/g,' ');}
+function fmtScenario(s){
+  if(s.startsWith('asset_depeg:'))return'Depeg '+(parseFloat(s.split(':')[1])*100).toFixed(0)+'%';
+  if(s.startsWith('market_wide:'))return'Market '+(parseFloat(s.split(':')[1])*100).toFixed(0)+'%';
+  if(s==='top10_pct')return'Top 10%';
+  if(s==='2pct')return'2% Shock';
+  if(s==='5pct')return'5% Shock';
+  if(s.startsWith('spot:pool_')){const f=parseInt(s.replace('spot:pool_',''));return'Spot '+(f/10000).toFixed(2)+'%';}
+  return s;
+}
+function fmtAlertVal(signal,raw){
+  const v=parseFloat(raw);
+  if(signal==='liquidation_at_risk')return fmt$(v);
+  if(signal==='oracle_deviation')return v.toFixed(1)+' bps';
+  if(signal==='coverage_ratio')return v.toFixed(4)+'×';
+  if(signal==='concentration')return v.toFixed(1)+'%';
+  return v.toFixed(2);
+}
 function fmtN(v,d=1){const n=Number(v);if(n>=1e9)return(n/1e9).toFixed(d)+'B';if(n>=1e6)return(n/1e6).toFixed(d)+'M';if(n>=1e3)return(n/1e3).toFixed(d)+'K';return n.toFixed(d)}
 function fmtHF(v){const n=Number(v);return n>=99?'∞':n.toFixed(3)}
 function shortAddr(a){return a?a.slice(0,6)+'…'+a.slice(-4):'–'}
@@ -491,7 +510,7 @@ async function loadOverview(){
     mkChart('event-pie-chart',{...bg,tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},legend:{bottom:0,textStyle:{color:'#9aa0a6'},type:'scroll'},series:[{type:'pie',radius:['40%','70%'],center:['50%','45%'],data:[{name:'Supply',value:stats.supply_count,itemStyle:{color:'#34a853'}},{name:'Borrow',value:stats.borrow_count,itemStyle:{color:'#4285f4'}},{name:'Repay',value:stats.repay_count,itemStyle:{color:'#00bcd4'}},{name:'Withdraw',value:stats.withdraw_count,itemStyle:{color:'#fbbc04'}},{name:'Liquidations',value:stats.liquidation_count,itemStyle:{color:'#ea4335'}}],label:{show:false}}]});
     const tbody=document.getElementById('mini-events-body');
     const tc={'Supply':'pill-green','Borrow':'pill-red','Repay':'pill-blue','Withdraw':'pill-yellow'};
-    tbody.innerHTML=recent.events.slice(0,20).map(e=>`<tr><td><span class="badge-pill ${tc[e.event_type]||'pill-gray'}">${e.event_type}</span></td><td>${e.reserve||'–'}</td><td class="addr">${shortAddr(e.user)}</td><td>${fmtN(e.amount,2)}</td></tr>`).join('');
+    tbody.innerHTML=recent.events.slice(0,20).map(e=>`<tr><td><span class="badge-pill ${tc[e.event_type]||'pill-gray'}">${e.event_type}</span></td><td>${e.reserve||'–'}</td><td class="addr">${shortAddr(e.user)}</td><td style="font-family:monospace;font-size:12px">${fmtN(e.amount,2)} <span style="color:var(--muted)">${e.reserve}</span></td></tr>`).join('');
   }catch(e){console.error('overview',e)}
 }
 
@@ -648,15 +667,22 @@ async function loadAlerts(){
     document.getElementById('alert-total').textContent=alerts.length;
     document.getElementById('alert-critical').textContent=alerts.filter(a=>a.severity==='critical').length;
     document.getElementById('alert-warning').textContent=alerts.filter(a=>a.severity==='warning').length;
-    document.getElementById('alerts-tbody').innerHTML=alerts.map(a=>`<tr>
-      <td><span class="${a.severity==='critical'?'sev-critical':a.severity==='warning'?'sev-warning':'sev-info'}">${a.severity.toUpperCase()}</span></td>
-      <td>${a.signal.replace(/_/g,' ')}</td><td>${a.asset}</td>
-      <td style="color:var(--muted);font-size:11px">${a.scenario}</td>
-      <td style="max-width:300px;font-size:12px">${a.message}</td>
-      <td>${a.block.toLocaleString()}</td>
-      <td style="color:var(--muted)">${timeAgo(a.ts)}</td>
-      <td>${a.resolved_at?'<span class="badge-pill pill-green">Resolved</span>':'<span class="badge-pill pill-red">Active</span>'}</td>
-    </tr>`).join('');
+    document.getElementById('alerts-tbody').innerHTML=alerts.map(a=>{
+      const rawVal=parseAlertField(a.message,'Value');
+      const rawThr=parseAlertField(a.message,'Threshold');
+      const valStr=rawVal!=null?fmtAlertVal(a.signal,rawVal):'—';
+      const thrStr=rawThr!=null?fmtAlertVal(a.signal,rawThr):'—';
+      return`<tr>
+        <td><span class="${a.severity==='critical'?'sev-critical':a.severity==='warning'?'sev-warning':'sev-info'}">${a.severity.toUpperCase()}</span></td>
+        <td style="font-size:12px">${fmtSignalName(a.signal)}</td>
+        <td><strong>${a.asset}</strong></td>
+        <td style="color:var(--muted);font-size:12px">${fmtScenario(a.scenario)}</td>
+        <td style="font-weight:600;font-family:monospace;font-size:13px">${valStr}</td>
+        <td style="color:var(--muted);font-size:12px;font-family:monospace">${thrStr}</td>
+        <td style="color:var(--muted);font-size:12px">${timeAgo(a.ts)}</td>
+        <td>${a.resolved_at?'<span class="badge-pill pill-green">Resolved</span>':'<span class="badge-pill pill-red">Active</span>'}</td>
+      </tr>`;
+    }).join('');
   }catch(e){console.error('alerts',e)}
 }
 
@@ -670,7 +696,7 @@ async function loadActivity(){
       <td><span class="badge-pill ${tc[e.event_type]||'pill-gray'}">${e.event_type}</span></td>
       <td>${e.reserve||'–'}</td>
       <td class="addr"><a href="https://etherscan.io/address/${e.user}" target="_blank">${shortAddr(e.user)}</a></td>
-      <td>${fmtN(e.amount,2)}</td>
+      <td style="font-family:monospace;font-size:12px">${fmtN(e.amount,2)} <span style="color:var(--muted)">${e.reserve}</span></td>
       <td style="color:var(--muted)">${timeAgo(e.timestamp)}</td>
       <td class="addr"><a href="https://etherscan.io/tx/${e.tx_hash}" target="_blank">${shortAddr(e.tx_hash)}</a></td>
     </tr>`).join('');
