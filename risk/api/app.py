@@ -848,3 +848,150 @@ async def backtest_summary() -> BacktestResponse:
             max_streak=0, p50=p50, p95=p95, recommended_threshold=p95,
         ))
     return BacktestResponse(summaries=summaries)
+
+
+# ── SVR (Smart Value Recapture) ───────────────────────────────────────────────
+
+# Assets known to have Chainlink SVR feeds on Aave v3 Ethereum
+_SVR_ASSETS = {"wstETH", "weETH"}
+
+@app.get("/svr/stats")
+async def svr_stats() -> dict[str, Any]:
+    pool = get_pool()
+    sym_map = _sym_map(load_assets_config())
+    async with pool.acquire() as conn:
+        head = await conn.fetchval("SELECT MAX(snapshot_block) FROM oracle_prices") or 0
+
+        # Reserve configs + oracle prices for coverage table
+        coverage_rows = await conn.fetch("""
+            SELECT
+                rc.reserve,
+                op.price_usd / 1e8          AS price_usd,
+                rc.ltv / 100.0                        AS ltv,
+                rc.liquidation_threshold / 100.0      AS liquidation_threshold,
+                rc.liquidation_bonus / 100.0 - 100.0  AS liquidation_bonus
+            FROM reserve_configs rc
+            JOIN oracle_prices op ON op.asset = rc.reserve AND op.snapshot_block = rc.snapshot_block
+            WHERE rc.snapshot_block = $1
+        """, head)
+
+        # Approximate per-asset supply/debt from supply and borrow events (volume proxy)
+        supply_vol = await conn.fetch("""
+            SELECT reserve, SUM(amount) AS total FROM aave_supply_events GROUP BY reserve
+        """)
+        borrow_vol = await conn.fetch("""
+            SELECT reserve, SUM(amount) AS total FROM aave_borrow_events GROUP BY reserve
+        """)
+        sup_map = {r["reserve"].lower(): float(r["total"] or 0) for r in supply_vol}
+        bor_map = {r["reserve"].lower(): float(r["total"] or 0) for r in borrow_vol}
+
+        # Liquidation bonus per collateral asset (all time)
+        liq_rows = await conn.fetch("""
+            SELECT
+                collateral_asset,
+                COUNT(*)                                      AS liq_count,
+                SUM(liquidated_collateral - debt_to_cover)   AS bonus_raw
+            FROM aave_liquidation_events
+            GROUP BY collateral_asset
+            ORDER BY bonus_raw DESC
+        """)
+
+        # 30-day liquidation bonus
+        head_block = await conn.fetchval("SELECT MAX(block_number) FROM indexer_cursor") or 0
+        bonus_30d = await conn.fetch("""
+            SELECT
+                collateral_asset,
+                COUNT(*)                                      AS count,
+                SUM(liquidated_collateral - debt_to_cover)   AS bonus_raw
+            FROM aave_liquidation_events
+            WHERE block_number >= $1
+            GROUP BY collateral_asset
+            ORDER BY bonus_raw DESC
+        """, max(head_block - 30 * 7200, 0))
+
+        # Daily bonus timeline
+        daily_rows = await conn.fetch("""
+            SELECT
+                collateral_asset,
+                (25854120 + ((block_number - 25854120) / 7200) * 7200) AS day_block,
+                SUM(liquidated_collateral - debt_to_cover) AS bonus_raw
+            FROM aave_liquidation_events
+            GROUP BY collateral_asset, day_block
+            ORDER BY day_block
+        """)
+
+    # Map addresses to symbols
+    def sym(addr: str) -> str:
+        return sym_map.get(addr.lower(), addr[:8])
+
+    # Build coverage table
+    coverage = []
+    for r in coverage_rows:
+        s = sym(r["reserve"])
+        p = float(r["price_usd"])
+        decimals = 18 if s != "USDC" else 6
+        sup_usd = sup_map.get(r["reserve"].lower(), 0) / (10 ** decimals) * p
+        bor_usd = bor_map.get(r["reserve"].lower(), 0) / (10 ** decimals) * p
+        coverage.append({
+            "asset": s,
+            "is_svr": s in _SVR_ASSETS,
+            "price_usd": p,
+            "collateral_usd": sup_usd,
+            "debt_usd": bor_usd,
+            "ltv": float(r["ltv"]),
+            "liquidation_threshold": float(r["liquidation_threshold"]),
+            "liquidation_bonus": float(r["liquidation_bonus"]),
+        })
+
+    # Aggregate bonus per collateral asset (all time)
+    bonus_by_asset: dict[str, dict] = {}
+    for r in liq_rows:
+        s = sym(r["collateral_asset"])
+        if s not in bonus_by_asset:
+            bonus_by_asset[s] = {"count": 0, "bonus_raw": 0, "is_svr": s in _SVR_ASSETS}
+        bonus_by_asset[s]["count"] += int(r["liq_count"])
+        bonus_by_asset[s]["bonus_raw"] += float(r["bonus_raw"] or 0)
+
+    # 30d bonus
+    bonus_30d_by_asset = {
+        sym(r["collateral_asset"]): {
+            "count": int(r["count"]),
+            "bonus_raw": float(r["bonus_raw"] or 0),
+        }
+        for r in bonus_30d
+    }
+
+    # Daily timeline
+    days_map: dict[int, dict] = {}
+    for r in daily_rows:
+        db = int(r["day_block"])
+        s = sym(r["collateral_asset"])
+        if db not in days_map:
+            days_map[db] = {}
+        days_map[db][s] = float(r["bonus_raw"] or 0)
+
+    # Convert day_block to approximate date string
+    HEAD_TS_APPROX = "2026-11-27"
+    import datetime as dt
+    head_dt = dt.date(2026, 11, 27)
+    day_entries = []
+    for day_block in sorted(days_map.keys()):
+        days_ago = (head_block - day_block) // 7200
+        d = head_dt - dt.timedelta(days=int(days_ago))
+        day_entries.append({"date": d.isoformat(), **days_map[day_block]})
+
+    assets_seen = list({s for entry in day_entries for s in entry if s != "date"})
+
+    return {
+        "svr_assets": list(_SVR_ASSETS),
+        "coverage": coverage,
+        "bonus_all_time": [
+            {"asset": k, **v} for k, v in sorted(bonus_by_asset.items(), key=lambda x: -x[1]["bonus_raw"])
+        ],
+        "bonus_30d": [
+            {"asset": k, **v} for k, v in sorted(bonus_30d_by_asset.items(), key=lambda x: -x[1]["bonus_raw"])
+        ],
+        "daily_bonus": day_entries,
+        "daily_assets": assets_seen,
+        "snapshot_block": head,
+    }

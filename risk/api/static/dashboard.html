@@ -104,6 +104,7 @@ tr:hover td{background:#161820}
   <button class="tab-btn" onclick="showTab('signals')">Risk Signals</button>
   <button class="tab-btn" onclick="showTab('alerts')">Alerts</button>
   <button class="tab-btn" onclick="showTab('activity')">Activity</button>
+  <button class="tab-btn" onclick="showTab('svr')">SVR</button>
 </div>
 
 <div class="main">
@@ -335,6 +336,62 @@ tr:hover td{background:#161820}
   </div>
 </div>
 
+<!-- SVR -->
+<div id="tab-svr" class="tab-content">
+  <div class="page-title">SVR — Smart Value Recapture</div>
+  <div style="background:#1a2a1a;border:1px solid #34a853;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#9aa0a6">
+    <strong style="color:#34a853">What is SVR?</strong> Chainlink Smart Value Recapture feeds provide delayed prices that allow Aave to capture liquidation bonuses before MEV bots can extract them. Assets with SVR feeds:
+    <span id="svr-asset-list" style="color:#4285f4;margin-left:8px">–</span>
+  </div>
+
+  <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+    <div class="stat-card"><div class="stat-label">SVR Liquidations (All Time)</div><div class="stat-value" id="svr-liq-count">–</div></div>
+    <div class="stat-card"><div class="stat-label">Total Bonus Captured</div><div class="stat-value" id="svr-bonus-total">–</div></div>
+    <div class="stat-card"><div class="stat-label">SVR Liquidations (30D)</div><div class="stat-value" id="svr-liq-30d">–</div></div>
+    <div class="stat-card"><div class="stat-label">Bonus Captured (30D)</div><div class="stat-value" id="svr-bonus-30d">–</div></div>
+  </div>
+
+  <div class="chart-grid">
+    <div class="chart-panel full">
+      <div class="chart-title">Liquidation Bonus Captured Over Time</div>
+      <div class="chart-sub">Daily bonus (seized collateral − debt covered) by collateral asset — proxy for SVR recaptured value</div>
+      <div id="svr-daily-chart" class="chart-box tall"></div>
+    </div>
+  </div>
+
+  <div class="chart-grid cols2">
+    <div class="chart-panel">
+      <div class="chart-title">Bonus Split by Collateral Asset</div>
+      <div class="chart-sub">Total liquidation bonus captured (all time), SVR assets highlighted</div>
+      <div id="svr-bonus-bar" class="chart-box"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">Recapture Rate by Asset</div>
+      <div class="chart-sub">Bonus as % of total debt covered — higher = more value recaptured per liquidation</div>
+      <div id="svr-rate-chart" class="chart-box"></div>
+    </div>
+  </div>
+
+  <div class="table-panel">
+    <div class="table-header"><span class="table-title">SVR Coverage — Reserve Feeds</span><span style="font-size:11px;color:var(--muted)">Collateral on SVR-eligible reserves</span></div>
+    <table>
+      <thead><tr>
+        <th>Asset</th><th>SVR Feed</th><th>Price</th><th>Collateral (USD)</th><th>Debt (USD)</th>
+        <th>LTV</th><th>Liq. Threshold</th><th>Liq. Bonus</th>
+      </tr></thead>
+      <tbody id="svr-coverage-tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="table-panel">
+    <div class="table-header"><span class="table-title">Bonus Captured by Asset (All Time)</span></div>
+    <table>
+      <thead><tr><th>Asset</th><th>SVR Feed</th><th>Liquidations</th><th>Total Bonus (raw units)</th><th>Share</th></tr></thead>
+      <tbody id="svr-bonus-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
 <!-- ACTIVITY -->
 <div id="tab-activity" class="tab-content">
   <div class="page-title">Recent Activity</div>
@@ -373,7 +430,7 @@ function showTab(name){
   document.getElementById('tab-'+name).classList.add('active');
   if(!loaded[name]){loaded[name]=true;loadTab(name)}
 }
-function loadTab(n){if(n==='overview')loadOverview();else if(n==='markets')loadMarkets();else if(n==='liquidations')loadLiquidations();else if(n==='wallets')loadWallets();else if(n==='signals')loadSignals();else if(n==='alerts')loadAlerts();else if(n==='activity')loadActivity()}
+function loadTab(n){if(n==='overview')loadOverview();else if(n==='markets')loadMarkets();else if(n==='liquidations')loadLiquidations();else if(n==='wallets')loadWallets();else if(n==='signals')loadSignals();else if(n==='alerts')loadAlerts();else if(n==='activity')loadActivity();else if(n==='svr')loadSvr()}
 
 let actDays=30,liqDays=30,scenario='asset_depeg';
 let _actData=null,_liqHistData=null,actChart=null,liqHistChart=null;
@@ -582,6 +639,81 @@ async function loadActivity(){
       <td class="addr"><a href="https://etherscan.io/tx/${e.tx_hash}" target="_blank">${shortAddr(e.tx_hash)}</a></td>
     </tr>`).join('');
   }catch(e){console.error('activity',e)}
+}
+
+// SVR
+async function loadSvr(){
+  try{
+    const d=await api('/svr/stats');
+    document.getElementById('svr-asset-list').textContent=d.svr_assets.join(', ');
+
+    // Stats
+    const svrBonus=d.bonus_all_time.filter(a=>a.is_svr);
+    const svrBonus30=d.bonus_30d.filter(a=>a.is_svr);
+    document.getElementById('svr-liq-count').textContent=svrBonus.reduce((s,a)=>s+a.count,0).toLocaleString();
+    document.getElementById('svr-bonus-total').textContent=fmtN(svrBonus.reduce((s,a)=>s+a.bonus_raw,0),2);
+    document.getElementById('svr-liq-30d').textContent=svrBonus30.reduce((s,a)=>s+a.count,0).toLocaleString();
+    document.getElementById('svr-bonus-30d').textContent=fmtN(svrBonus30.reduce((s,a)=>s+a.bonus_raw,0),2);
+
+    // Daily bonus chart
+    const days=d.daily_bonus,assets=d.daily_assets;
+    mkChart('svr-daily-chart',{...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      legend:{data:assets,bottom:0,textStyle:{color:'#9aa0a6'}},
+      grid,
+      xAxis:{type:'category',data:days.map(x=>x.date),axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},
+      yAxis:{type:'value',axisLabel:{color:'#9aa0a6'}},
+      series:assets.map((a,i)=>({name:a,type:'bar',stack:'t',
+        data:days.map(x=>x[a]||0),
+        itemStyle:{color:COLORS[i%8],opacity:d.svr_assets.includes(a)?1:0.4}}))
+    });
+
+    // Bonus bar
+    const ba=d.bonus_all_time;
+    mkChart('svr-bonus-bar',{...bg,tooltip:{trigger:'axis'},
+      grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},
+      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6'}},
+      yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmtN(v)}},
+      series:[{type:'bar',
+        data:ba.map(a=>({value:a.bonus_raw,itemStyle:{color:a.is_svr?'#34a853':'#4285f4'}})),
+        label:{show:true,position:'top',formatter:p=>fmtN(p.value,1),color:'#9aa0a6'}}]
+    });
+
+    // Recapture rate (bonus / debt covered proxy — use count as denominator)
+    mkChart('svr-rate-chart',{...bg,tooltip:{trigger:'axis'},
+      grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},
+      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6'}},
+      yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>v.toFixed(0)},name:'Avg Bonus/Liq'},
+      series:[{type:'bar',
+        data:ba.map(a=>({value:a.count>0?a.bonus_raw/a.count:0,
+          itemStyle:{color:a.is_svr?'#34a853':'#4285f4'}})),
+        label:{show:true,position:'top',formatter:p=>fmtN(p.value,2),color:'#9aa0a6'}}]
+    });
+
+    // Coverage table
+    const totalBonus=ba.reduce((s,a)=>s+a.bonus_raw,0)||1;
+    document.getElementById('svr-coverage-tbody').innerHTML=d.coverage.map(c=>`<tr>
+      <td><strong>${c.asset}</strong></td>
+      <td>${c.is_svr?'<span class="badge-pill pill-green">SVR</span>':'<span class="badge-pill pill-gray">Standard</span>'}</td>
+      <td>$${Number(c.price_usd).toFixed(2)}</td>
+      <td>${fmt$(c.collateral_usd)}</td>
+      <td>${fmt$(c.debt_usd)}</td>
+      <td>${c.ltv}%</td><td>${c.liquidation_threshold}%</td><td>${c.liquidation_bonus}%</td>
+    </tr>`).join('');
+
+    // Bonus table
+    document.getElementById('svr-bonus-tbody').innerHTML=ba.map(a=>`<tr>
+      <td><strong>${a.asset}</strong></td>
+      <td>${a.is_svr?'<span class="badge-pill pill-green">SVR</span>':'<span class="badge-pill pill-gray">Standard</span>'}</td>
+      <td>${a.count.toLocaleString()}</td>
+      <td>${fmtN(a.bonus_raw,2)}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="hf-bar"><div class="hf-bar-fill" style="width:${Math.min(a.bonus_raw/totalBonus*100,100).toFixed(1)}%;background:${a.is_svr?'#34a853':'#4285f4'}"></div></div>
+          ${(a.bonus_raw/totalBonus*100).toFixed(1)}%
+        </div>
+      </td>
+    </tr>`).join('');
+  }catch(e){console.error('svr',e)}
 }
 
 // STATUS
