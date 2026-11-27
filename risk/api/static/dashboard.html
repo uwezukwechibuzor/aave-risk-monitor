@@ -341,21 +341,19 @@ tr:hover td{background:#161820}
   <div class="page-title">SVR — Smart Value Recapture</div>
 
   <!-- SVR status banner — updated by loadSvr() -->
-  <div id="svr-status-banner" style="border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#9aa0a6;background:#1e1e1e;border:1px solid #444">
-    <strong>What is SVR?</strong> Chainlink Smart Value Recapture feeds use delayed prices so Aave captures liquidation bonuses before MEV bots. The <code>SvrOracleSteward</code> contract (<span id="svr-steward-addr" style="color:#4285f4;font-family:monospace;font-size:11px">–</span>) manages which assets use SVR oracles. This monitor indexes <code>SvrOracleConfigChanged</code> events on-chain to track live SVR status.
-    <div id="svr-deploy-note" style="margin-top:8px;color:#fbbc04;display:none">
-      ⚠ SVR oracles are not yet configured on Aave v3 Ethereum. The steward contract is deployed but no assets have been assigned SVR feeds. Data below reflects all liquidations (pre-SVR baseline).
-    </div>
-    <div id="svr-active-note" style="margin-top:8px;color:#34a853;display:none">
-      ✓ SVR is active. Assets on SVR feeds: <span id="svr-asset-list" style="color:#4285f4">–</span>
+  <div id="svr-status-banner" style="border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#9aa0a6;background:#1a2a1a;border:1px solid #34a853">
+    <strong style="color:#34a853">✓ SVR is active on Ethereum Core</strong> — Chainlink's <strong>DualAggregator</strong> (<a href="https://etherscan.io/address/0x7c7FdFCa295a787ded12Bb5c1A49A8D2cC20E3F8" target="_blank" style="color:#4285f4;font-family:monospace;font-size:11px">0x7c7FdFC…</a>) went live 2025-03-18. It provides two prices simultaneously: a <em>slow</em> (SVR) price for liquidation assessment and a <em>fast</em> price for health factor checks. The WETH EACAggregatorProxy was upgraded to use this feed, and both <strong>wstETH</strong> and <strong>weETH</strong> PriceCapAdapters reference it as their base USD feed — making all their liquidations SVR liquidations.
+    <div style="margin-top:8px">
+      Governance is managed by <code>SvrOracleSteward</code> (<span id="svr-steward-addr" style="color:#4285f4;font-family:monospace;font-size:11px">–</span>) which emits <code>SvrOracleConfigChanged</code> for future oracle switches (indexed by this monitor).
+      Active SVR assets: <span id="svr-asset-list" style="color:#34a853;font-weight:bold">–</span>
     </div>
   </div>
 
   <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
-    <div class="stat-card"><div class="stat-label">SVR Assets Configured</div><div class="stat-value" id="svr-asset-count">–</div></div>
+    <div class="stat-card"><div class="stat-label">SVR Assets (Core Market)</div><div class="stat-value" id="svr-asset-count">–</div></div>
     <div class="stat-card"><div class="stat-label">SVR Liquidations (30D)</div><div class="stat-value" id="svr-liq-30d">–</div></div>
-    <div class="stat-card"><div class="stat-label">Bonus Recaptured (30D, raw)</div><div class="stat-value" id="svr-bonus-30d">–</div></div>
-    <div class="stat-card"><div class="stat-label">Config Events Indexed</div><div class="stat-value" id="svr-config-events">–</div></div>
+    <div class="stat-card"><div class="stat-label">Bonus Recaptured (30D)</div><div class="stat-value" id="svr-bonus-30d">–</div></div>
+    <div class="stat-card"><div class="stat-label">Steward Events Indexed</div><div class="stat-value" id="svr-config-events">–</div></div>
   </div>
 
   <div class="chart-grid">
@@ -659,20 +657,13 @@ async function loadSvr(){
 
     // Status banner
     document.getElementById('svr-steward-addr').textContent=d.steward_address||'–';
-    if(d.svr_active){
-      document.getElementById('svr-active-note').style.display='block';
-      document.getElementById('svr-deploy-note').style.display='none';
-      const syms=d.svr_assets.map(a=>a.symbol).join(', ');
-      document.getElementById('svr-asset-list').textContent=syms||'–';
-    }else{
-      document.getElementById('svr-deploy-note').style.display='block';
-      document.getElementById('svr-active-note').style.display='none';
-    }
+    const syms=d.svr_assets.map(a=>a.symbol||shortAddr(a.asset)).join(', ');
+    document.getElementById('svr-asset-list').textContent=syms||'–';
 
     // Stat cards
     document.getElementById('svr-asset-count').textContent=d.svr_assets.length;
     document.getElementById('svr-liq-30d').textContent=(d.svr_liq_count_30d||0).toLocaleString();
-    document.getElementById('svr-bonus-30d').textContent=fmtN(d.svr_bonus_30d_raw||0,2);
+    document.getElementById('svr-bonus-30d').textContent=fmt$(d.svr_bonus_30d_usd||0,2);
     document.getElementById('svr-config-events').textContent=(d.total_svr_config_events||0).toLocaleString();
     document.getElementById('svr-config-events-note').textContent=`${(d.total_svr_config_events||0).toLocaleString()} SvrOracleConfigChanged events indexed`;
 
@@ -692,33 +683,33 @@ async function loadSvr(){
     }else{
       const el=document.getElementById('svr-daily-chart');
       el.style.display='flex';el.style.alignItems='center';el.style.justifyContent='center';
-      el.innerHTML='<div style="color:#9aa0a6;font-size:13px">No SVR liquidation data — awaiting SVR oracle activation on-chain</div>';
+      el.innerHTML='<div style="color:#9aa0a6;font-size:13px">No SVR liquidation data in the indexed range yet — indexer may still be catching up</div>';
     }
 
-    // Bonus bar (all assets, SVR highlighted)
-    const ba=d.bonus_all_time;
-    mkChart('svr-bonus-bar',{...bg,tooltip:{trigger:'axis'},
+    // Bonus bar (USD, SVR assets highlighted green)
+    const ba=d.bonus_all_time.filter(a=>a.bonus_usd>0);
+    mkChart('svr-bonus-bar',{...bg,tooltip:{trigger:'axis',formatter:p=>`${p[0].name}<br/>${fmt$(p[0].value)}`},
       grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},
-      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6'}},
-      yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmtN(v)}},
+      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},
+      yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},
       series:[{type:'bar',
-        data:ba.map(a=>({value:a.bonus_raw,itemStyle:{color:a.is_svr?'#34a853':'#4285f4'}})),
-        label:{show:true,position:'top',formatter:p=>fmtN(p.value,1),color:'#9aa0a6'}}]
+        data:ba.map(a=>({value:a.bonus_usd,itemStyle:{color:a.is_svr?'#34a853':'#4285f4'}})),
+        label:{show:true,position:'top',formatter:p=>fmt$(p.value,1),color:'#9aa0a6',fontSize:9}}]
     });
 
-    // Avg bonus per liquidation
-    mkChart('svr-rate-chart',{...bg,tooltip:{trigger:'axis'},
+    // Avg bonus per liquidation (USD)
+    mkChart('svr-rate-chart',{...bg,tooltip:{trigger:'axis',formatter:p=>`${p[0].name}<br/>${fmt$(p[0].value)}/liq`},
       grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},
-      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6'}},
-      yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmtN(v)},name:'Avg Bonus/Liq'},
+      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},
+      yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)},name:'$/Liq'},
       series:[{type:'bar',
-        data:ba.map(a=>({value:a.count>0?a.bonus_raw/a.count:0,
+        data:ba.map(a=>({value:a.count>0?a.bonus_usd/a.count:0,
           itemStyle:{color:a.is_svr?'#34a853':'#4285f4'}})),
-        label:{show:true,position:'top',formatter:p=>fmtN(p.value,2),color:'#9aa0a6'}}]
+        label:{show:true,position:'top',formatter:p=>fmt$(p.value,0),color:'#9aa0a6',fontSize:9}}]
     });
 
-    // Coverage table — show real SVR oracle address when available
-    const totalBonus=ba.reduce((s,a)=>s+a.bonus_raw,0)||1;
+    // Coverage table
+    const totalBonus=ba.reduce((s,a)=>s+a.bonus_usd,0)||1;
     document.getElementById('svr-coverage-tbody').innerHTML=d.coverage.map(c=>`<tr>
       <td><strong>${c.asset}</strong></td>
       <td>${c.is_svr?'<span class="badge-pill pill-green">SVR Active</span>':'<span class="badge-pill pill-gray">Standard</span>'}</td>
@@ -729,16 +720,16 @@ async function loadSvr(){
       <td>${c.ltv}%</td><td>${c.liquidation_threshold}%</td><td>${c.liquidation_bonus}%</td>
     </tr>`).join('');
 
-    // Bonus breakdown table
+    // Bonus breakdown table (USD)
     document.getElementById('svr-bonus-tbody').innerHTML=ba.map(a=>`<tr>
       <td><strong>${a.asset}</strong></td>
       <td>${a.is_svr?'<span class="badge-pill pill-green">SVR</span>':'<span class="badge-pill pill-gray">Standard</span>'}</td>
       <td>${a.count.toLocaleString()}</td>
-      <td>${fmtN(a.bonus_raw,2)}</td>
+      <td>${fmt$(a.bonus_usd)}</td>
       <td>
         <div style="display:flex;align-items:center;gap:8px">
-          <div class="hf-bar"><div class="hf-bar-fill" style="width:${Math.min(a.bonus_raw/totalBonus*100,100).toFixed(1)}%;background:${a.is_svr?'#34a853':'#4285f4'}"></div></div>
-          ${(a.bonus_raw/totalBonus*100).toFixed(1)}%
+          <div class="hf-bar"><div class="hf-bar-fill" style="width:${Math.min(a.bonus_usd/totalBonus*100,100).toFixed(1)}%;background:${a.is_svr?'#34a853':'#4285f4'}"></div></div>
+          ${(a.bonus_usd/totalBonus*100).toFixed(1)}%
         </div>
       </td>
     </tr>`).join('');
