@@ -39,6 +39,10 @@ from risk.rpc import EthRPC, RPCBudgetExceeded
 logger = logging.getLogger(__name__)
 
 STREAM_ID = "aave-v3-ethereum-rpc"
+# The backfill keeps its own cursor so it can run at any time, before or after
+# the live indexer has started, without either one moving the other's position.
+# Inserts are idempotent (ON CONFLICT DO NOTHING), so overlapping ranges are safe.
+BACKFILL_STREAM_ID = "aave-v3-ethereum-rpc-backfill"
 CHUNK_SIZE = 2000  # blocks per eth_getLogs call
 
 
@@ -77,7 +81,7 @@ async def run_backfill(
     filter_cfg = _build_filter_config(settings, assets_config)
 
     async with pool.acquire() as conn:
-        cursor = await load_cursor(conn, STREAM_ID)
+        cursor = await load_cursor(conn, BACKFILL_STREAM_ID)
 
     resume_block = cursor.block_number + 1 if cursor else start_block
     if resume_block > end_block:
@@ -89,7 +93,9 @@ async def run_backfill(
     for chunk_start in range(resume_block, end_block + 1, CHUNK_SIZE):
         chunk_end = min(chunk_start + CHUNK_SIZE - 1, end_block)
         try:
-            await _process_range(pool, rpc, filter_cfg, oracle_sources, chunk_start, chunk_end)
+            await _process_range(
+                pool, rpc, filter_cfg, oracle_sources, chunk_start, chunk_end, BACKFILL_STREAM_ID
+            )
         except RPCBudgetExceeded:
             logger.warning("RPC budget exceeded at block %d. Stopping.", chunk_start)
             break
@@ -118,6 +124,10 @@ async def run_live(
 
             async with pool.acquire() as conn:
                 cursor = await load_cursor(conn, STREAM_ID)
+                if cursor is None:
+                    # First live run: continue from where a backfill got to (if one
+                    # ran first) so there's no gap, otherwise start at head.
+                    cursor = await load_cursor(conn, BACKFILL_STREAM_ID)
 
             indexed_block = cursor.block_number if cursor else head - 1
             if indexed_block >= head:
@@ -126,7 +136,7 @@ async def run_live(
 
             chunk_end = min(indexed_block + CHUNK_SIZE, head)
             await _process_range(
-                pool, rpc, filter_cfg, oracle_sources, indexed_block + 1, chunk_end
+                pool, rpc, filter_cfg, oracle_sources, indexed_block + 1, chunk_end, STREAM_ID
             )
             async with pool.acquire() as conn:
                 await mark_final(conn, finalized_block)
@@ -147,6 +157,7 @@ async def _process_range(
     oracle_sources: dict[str, str],
     from_block: int,
     to_block: int,
+    stream_id: str,
 ) -> None:
     # Fetch Aave pool logs
     aave_logs = await rpc.eth_get_logs(
@@ -211,7 +222,7 @@ async def _process_range(
         async with pool.acquire() as conn:
             count = await ingest_block(
                 conn,
-                STREAM_ID,
+                stream_id,
                 block_num,
                 block_hash,
                 cursor_str,
@@ -225,7 +236,7 @@ async def _process_range(
         block_hash = ""
         cursor_str = f"rpc:{to_block}"
         async with pool.acquire() as conn, conn.transaction():
-            await save_cursor(conn, STREAM_ID, cursor_str, to_block, block_hash)
+            await save_cursor(conn, stream_id, cursor_str, to_block, block_hash)
 
 
 async def _update_indexer_health(
