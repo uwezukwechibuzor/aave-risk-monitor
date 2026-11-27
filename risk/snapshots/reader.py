@@ -27,6 +27,7 @@ from risk.rpc import EthRPC
 logger = logging.getLogger(__name__)
 
 RAY = 10**27
+WAD = 10**18  # health factor from getUserAccountData is WAD-scaled, not RAY
 _HEALTH_FACTOR_MAX = 2**256 - 1  # type(uint256).max means no debt
 
 
@@ -133,7 +134,7 @@ async def _snapshot_batch(
                 (emode,) = decode(["uint256"], em_data)
 
             # Normalize health factor: type(uint256).max means no debt → set to 999
-            hf_norm = 999.0 if int(hf) == _HEALTH_FACTOR_MAX else int(hf) / RAY
+            hf_norm = 999.0 if int(hf) == _HEALTH_FACTOR_MAX else int(hf) / WAD
 
             await conn.execute(
                 """
