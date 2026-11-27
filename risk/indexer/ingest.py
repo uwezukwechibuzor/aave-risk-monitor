@@ -23,6 +23,7 @@ from risk.indexer.topics import (
     REPAY,
     RESERVE_DATA_UPDATED,
     SUPPLY,
+    SVR_ORACLE_CONFIG_CHANGED,
     UNISWAP_SWAP,
     WITHDRAW,
 )
@@ -221,6 +222,22 @@ async def _write_domain_event(
             d["round_id"],
             d["answer"],
             d["updated_at_ts"],
+        )
+
+    elif topic0 == SVR_ORACLE_CONFIG_CHANGED:
+        await conn.execute(
+            """
+            INSERT INTO svr_oracle_configs
+                (block_number, log_index, tx_hash, asset, current_oracle, svr_oracle)
+            VALUES ($1,$2,$3,$4,$5,$6)
+            ON CONFLICT DO NOTHING
+            """,
+            block_number,
+            log_index,
+            tx_hash,
+            d["asset"],
+            d["current_oracle"],
+            d["svr_oracle"],
         )
 
     elif topic0 in (UNISWAP_SWAP, CURVE_TOKEN_EXCHANGE):

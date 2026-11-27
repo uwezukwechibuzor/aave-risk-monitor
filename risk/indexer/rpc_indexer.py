@@ -17,6 +17,7 @@ import asyncpg
 
 from risk.addresses import (
     POOL,
+    SVR_STEWARD,
 )
 from risk.config import Settings
 from risk.indexer.cursor import load_cursor, mark_final, save_cursor
@@ -29,6 +30,7 @@ from risk.indexer.topics import (
     REPAY,
     RESERVE_DATA_UPDATED,
     SUPPLY,
+    SVR_ORACLE_CONFIG_CHANGED,
     UNISWAP_SWAP,
     WITHDRAW,
 )
@@ -174,7 +176,15 @@ async def _process_range(
             to_block=to_block,
         )
 
-    all_logs = aave_logs + oracle_logs + dex_logs
+    # Fetch SVR oracle steward logs (SvrOracleConfigChanged)
+    svr_logs = await rpc.eth_get_logs(
+        address=SVR_STEWARD,
+        topics=[[SVR_ORACLE_CONFIG_CHANGED]],
+        from_block=from_block,
+        to_block=to_block,
+    )
+
+    all_logs = aave_logs + oracle_logs + dex_logs + svr_logs
 
     # Group by block
     blocks: dict[int, list[dict[str, Any]]] = {}

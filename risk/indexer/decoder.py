@@ -23,6 +23,7 @@ from risk.indexer.topics import (
     REPAY,
     RESERVE_DATA_UPDATED,
     SUPPLY,
+    SVR_ORACLE_CONFIG_CHANGED,
     UNISWAP_SWAP,
     WITHDRAW,
 )
@@ -182,6 +183,18 @@ def decode_uniswap_swap(log: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def decode_svr_oracle_config_changed(log: dict[str, Any]) -> dict[str, Any]:
+    # SvrOracleConfigChanged(address indexed asset, address currentOracle, address svrOracle)
+    asset = _decode_address_topic(log["topics"][1])
+    data = _hex_to_bytes(log["data"])
+    current_oracle, svr_oracle = decode(["address", "address"], data)
+    return {
+        "asset": asset,
+        "current_oracle": to_checksum_address(current_oracle),
+        "svr_oracle": to_checksum_address(svr_oracle),
+    }
+
+
 def decode_curve_token_exchange(log: dict[str, Any]) -> dict[str, Any]:
     # TokenExchange(address indexed buyer, int128 sold_id, uint256 tokens_sold,
     #               int128 bought_id, uint256 tokens_bought)
@@ -206,6 +219,7 @@ TOPIC_DECODERS = {
     LIQUIDATION_CALL: decode_liquidation_call,
     RESERVE_DATA_UPDATED: decode_reserve_data_updated,
     ANSWER_UPDATED: decode_answer_updated,
+    SVR_ORACLE_CONFIG_CHANGED: decode_svr_oracle_config_changed,
     UNISWAP_SWAP: decode_uniswap_swap,
     CURVE_TOKEN_EXCHANGE: decode_curve_token_exchange,
 }

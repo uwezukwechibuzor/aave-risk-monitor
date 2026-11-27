@@ -27,6 +27,10 @@ UNISWAP_V3_QUOTER_V2 = to_checksum_address("0x61fFE014bA17989E743c5F6cB21bF96975
 # WETH
 WETH = to_checksum_address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
 
+# ── SVR (Smart Value Recapture) ───────────────────────────────────────────────
+# Source: bgd-labs/aave-address-book AaveV3Ethereum.SVR_STEWARD
+SVR_STEWARD = to_checksum_address("0x8b493f416F5F7933cC146b1899c069F2361cad60")
+
 # ── Asset addresses ───────────────────────────────────────────────────────────
 WSTETH = to_checksum_address("0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0")
 WEETH = to_checksum_address("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee")

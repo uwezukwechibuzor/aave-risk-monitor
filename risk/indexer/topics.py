@@ -54,6 +54,12 @@ CURVE_TOKEN_EXCHANGE = (
     "0x" + keccak(text="TokenExchange(address,int128,uint256,int128,uint256)").hex()
 )
 
+# ── Chainlink SVR OracleSteward ───────────────────────────────────────────────
+# SvrOracleConfigChanged(address indexed asset, address currentOracle, address svrOracle)
+SVR_ORACLE_CONFIG_CHANGED = (
+    "0x" + keccak(text="SvrOracleConfigChanged(address,address,address)").hex()
+)
+
 ALL_TOPICS = {
     "Supply": SUPPLY,
     "Withdraw": WITHDRAW,
@@ -64,4 +70,5 @@ ALL_TOPICS = {
     "AnswerUpdated": ANSWER_UPDATED,
     "UniswapSwap": UNISWAP_SWAP,
     "CurveTokenExchange": CURVE_TOKEN_EXCHANGE,
+    "SvrOracleConfigChanged": SVR_ORACLE_CONFIG_CHANGED,
 }

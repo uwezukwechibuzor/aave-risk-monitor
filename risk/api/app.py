@@ -852,40 +852,83 @@ async def backtest_summary() -> BacktestResponse:
 
 # ── SVR (Smart Value Recapture) ───────────────────────────────────────────────
 
-# Assets known to have Chainlink SVR feeds on Aave v3 Ethereum
-_SVR_ASSETS = {"wstETH", "weETH"}
+# SvrOracleSteward deployed at block ~19435000 (March 13, 2025)
+_SVR_STEWARD_DEPLOY_BLOCK = 19_435_000
 
 @app.get("/svr/stats")
 async def svr_stats() -> dict[str, Any]:
+    import datetime as dt
+
     pool = get_pool()
     sym_map = _sym_map(load_assets_config())
     async with pool.acquire() as conn:
         head = await conn.fetchval("SELECT MAX(snapshot_block) FROM oracle_prices") or 0
+        head_block = await conn.fetchval("SELECT MAX(block_number) FROM indexer_cursor") or 0
+
+        # Determine which assets currently have SVR enabled from on-chain events.
+        # The latest SvrOracleConfigChanged per asset defines current state.
+        # svr_oracle != currentOracle means SVR is active (address(0) means disabled/removed).
+        svr_config_rows = await conn.fetch("""
+            SELECT DISTINCT ON (asset)
+                asset, current_oracle, svr_oracle, block_number, tx_hash
+            FROM svr_oracle_configs
+            ORDER BY asset, block_number DESC
+        """)
+
+        # Active SVR = svr_oracle address is set (not zero address)
+        _ZERO = "0x0000000000000000000000000000000000000000"
+        active_svr: dict[str, dict] = {
+            r["asset"].lower(): {
+                "asset": r["asset"],
+                "current_oracle": r["current_oracle"],
+                "svr_oracle": r["svr_oracle"],
+                "enabled_block": int(r["block_number"]),
+                "tx_hash": r["tx_hash"],
+            }
+            for r in svr_config_rows
+            if r["svr_oracle"] != _ZERO
+        }
+
+        # Number of SVR config change events ever indexed (monitors the steward)
+        total_svr_events = await conn.fetchval("SELECT COUNT(*) FROM svr_oracle_configs") or 0
 
         # Reserve configs + oracle prices for coverage table
         coverage_rows = await conn.fetch("""
             SELECT
                 rc.reserve,
-                op.price_usd / 1e8          AS price_usd,
-                rc.ltv / 100.0                        AS ltv,
-                rc.liquidation_threshold / 100.0      AS liquidation_threshold,
-                rc.liquidation_bonus / 100.0 - 100.0  AS liquidation_bonus
+                op.price_usd / 1e8                        AS price_usd,
+                rc.ltv / 100.0                            AS ltv,
+                rc.liquidation_threshold / 100.0          AS liquidation_threshold,
+                rc.liquidation_bonus / 100.0 - 100.0      AS liquidation_bonus
             FROM reserve_configs rc
-            JOIN oracle_prices op ON op.asset = rc.reserve AND op.snapshot_block = rc.snapshot_block
+            JOIN oracle_prices op
+                ON op.asset = rc.reserve AND op.snapshot_block = rc.snapshot_block
             WHERE rc.snapshot_block = $1
         """, head)
 
-        # Approximate per-asset supply/debt from supply and borrow events (volume proxy)
-        supply_vol = await conn.fetch("""
-            SELECT reserve, SUM(amount) AS total FROM aave_supply_events GROUP BY reserve
-        """)
-        borrow_vol = await conn.fetch("""
-            SELECT reserve, SUM(amount) AS total FROM aave_borrow_events GROUP BY reserve
-        """)
+        # Approximate per-asset supply/debt from latest user_positions snapshot
+        pos_rows = await conn.fetch("""
+            SELECT
+                p.reserve,
+                SUM(up.total_collateral_base) AS collateral_base,
+                SUM(up.total_debt_base)       AS debt_base
+            FROM user_positions up
+            JOIN reserve_configs p ON up.snapshot_block = p.snapshot_block
+            WHERE up.snapshot_block = $1
+            GROUP BY p.reserve
+        """, head) if head else []
+
+        # Fall back to event volume proxy if positions unavailable
+        supply_vol = await conn.fetch(
+            "SELECT reserve, SUM(amount) AS total FROM aave_supply_events GROUP BY reserve"
+        )
+        borrow_vol = await conn.fetch(
+            "SELECT reserve, SUM(amount) AS total FROM aave_borrow_events GROUP BY reserve"
+        )
         sup_map = {r["reserve"].lower(): float(r["total"] or 0) for r in supply_vol}
         bor_map = {r["reserve"].lower(): float(r["total"] or 0) for r in borrow_vol}
 
-        # Liquidation bonus per collateral asset (all time)
+        # Liquidation bonus per collateral asset (all time) — only SVR-active assets
         liq_rows = await conn.fetch("""
             SELECT
                 collateral_asset,
@@ -897,7 +940,6 @@ async def svr_stats() -> dict[str, Any]:
         """)
 
         # 30-day liquidation bonus
-        head_block = await conn.fetchval("SELECT MAX(block_number) FROM indexer_cursor") or 0
         bonus_30d = await conn.fetch("""
             SELECT
                 collateral_asset,
@@ -909,22 +951,27 @@ async def svr_stats() -> dict[str, Any]:
             ORDER BY bonus_raw DESC
         """, max(head_block - 30 * 7200, 0))
 
-        # Daily bonus timeline
-        daily_rows = await conn.fetch("""
-            SELECT
-                collateral_asset,
-                (25854120 + ((block_number - 25854120) / 7200) * 7200) AS day_block,
-                SUM(liquidated_collateral - debt_to_cover) AS bonus_raw
-            FROM aave_liquidation_events
-            GROUP BY collateral_asset, day_block
-            ORDER BY day_block
-        """)
+        # Daily bonus timeline — only for SVR-active assets from their activation block
+        # When SVR is not yet active, this returns nothing (correct — no SVR recapture occurred)
+        svr_active_addrs = list(active_svr.keys())
+        if svr_active_addrs:
+            daily_rows = await conn.fetch("""
+                SELECT
+                    collateral_asset,
+                    (25854120 + ((block_number - 25854120) / 7200) * 7200) AS day_block,
+                    SUM(liquidated_collateral - debt_to_cover) AS bonus_raw
+                FROM aave_liquidation_events
+                WHERE lower(collateral_asset) = ANY($1)
+                GROUP BY collateral_asset, day_block
+                ORDER BY day_block
+            """, svr_active_addrs)
+        else:
+            daily_rows = []
 
-    # Map addresses to symbols
     def sym(addr: str) -> str:
         return sym_map.get(addr.lower(), addr[:8])
 
-    # Build coverage table
+    # Build coverage table — mark assets with active SVR oracle
     coverage = []
     for r in coverage_rows:
         s = sym(r["reserve"])
@@ -932,9 +979,11 @@ async def svr_stats() -> dict[str, Any]:
         decimals = 18 if s != "USDC" else 6
         sup_usd = sup_map.get(r["reserve"].lower(), 0) / (10 ** decimals) * p
         bor_usd = bor_map.get(r["reserve"].lower(), 0) / (10 ** decimals) * p
+        svr_info = active_svr.get(r["reserve"].lower())
         coverage.append({
             "asset": s,
-            "is_svr": s in _SVR_ASSETS,
+            "is_svr": svr_info is not None,
+            "svr_oracle": svr_info["svr_oracle"] if svr_info else None,
             "price_usd": p,
             "collateral_usd": sup_usd,
             "debt_usd": bor_usd,
@@ -943,12 +992,13 @@ async def svr_stats() -> dict[str, Any]:
             "liquidation_bonus": float(r["liquidation_bonus"]),
         })
 
-    # Aggregate bonus per collateral asset (all time)
+    # Aggregate bonus per collateral asset — SVR assets only
     bonus_by_asset: dict[str, dict] = {}
     for r in liq_rows:
         s = sym(r["collateral_asset"])
+        is_svr = r["collateral_asset"].lower() in active_svr
         if s not in bonus_by_asset:
-            bonus_by_asset[s] = {"count": 0, "bonus_raw": 0, "is_svr": s in _SVR_ASSETS}
+            bonus_by_asset[s] = {"count": 0, "bonus_raw": 0, "is_svr": is_svr}
         bonus_by_asset[s]["count"] += int(r["liq_count"])
         bonus_by_asset[s]["bonus_raw"] += float(r["bonus_raw"] or 0)
 
@@ -957,11 +1007,12 @@ async def svr_stats() -> dict[str, Any]:
         sym(r["collateral_asset"]): {
             "count": int(r["count"]),
             "bonus_raw": float(r["bonus_raw"] or 0),
+            "is_svr": r["collateral_asset"].lower() in active_svr,
         }
         for r in bonus_30d
     }
 
-    # Daily timeline
+    # Daily timeline (empty when SVR not yet active)
     days_map: dict[int, dict] = {}
     for r in daily_rows:
         db = int(r["day_block"])
@@ -970,10 +1021,7 @@ async def svr_stats() -> dict[str, Any]:
             days_map[db] = {}
         days_map[db][s] = float(r["bonus_raw"] or 0)
 
-    # Convert day_block to approximate date string
-    HEAD_TS_APPROX = "2026-11-27"
-    import datetime as dt
-    head_dt = dt.date(2026, 11, 27)
+    head_dt = dt.date.today()
     day_entries = []
     for day_block in sorted(days_map.keys()):
         days_ago = (head_block - day_block) // 7200
@@ -982,8 +1030,34 @@ async def svr_stats() -> dict[str, Any]:
 
     assets_seen = list({s for entry in day_entries for s in entry if s != "date"})
 
+    # Compute SVR recapture totals (only for SVR-active assets)
+    svr_bonus_all_time = sum(
+        v["bonus_raw"] for k, v in bonus_by_asset.items() if v["is_svr"]
+    )
+    svr_bonus_30d = sum(
+        v["bonus_raw"] for k, v in bonus_30d_by_asset.items() if v["is_svr"]
+    )
+    svr_liq_count_30d = sum(
+        v["count"] for k, v in bonus_30d_by_asset.items() if v["is_svr"]
+    )
+
     return {
-        "svr_assets": list(_SVR_ASSETS),
+        "svr_active": len(active_svr) > 0,
+        "svr_assets": [
+            {
+                "symbol": sym(info["asset"]),
+                "asset": info["asset"],
+                "svr_oracle": info["svr_oracle"],
+                "current_oracle": info["current_oracle"],
+                "enabled_block": info["enabled_block"],
+            }
+            for info in active_svr.values()
+        ],
+        "steward_address": "0x8b493f416F5F7933cC146b1899c069F2361cad60",
+        "total_svr_config_events": int(total_svr_events),
+        "svr_bonus_all_time_raw": svr_bonus_all_time,
+        "svr_bonus_30d_raw": svr_bonus_30d,
+        "svr_liq_count_30d": svr_liq_count_30d,
         "coverage": coverage,
         "bonus_all_time": [
             {"asset": k, **v} for k, v in sorted(bonus_by_asset.items(), key=lambda x: -x[1]["bonus_raw"])

@@ -95,6 +95,7 @@ async def handle_reorg(
         "aave_reserve_updated_events",
         "chainlink_price_events",
         "dex_swap_events",
+        "svr_oracle_configs",
     ]:
         deleted = await conn.execute(
             f"DELETE FROM {table} WHERE block_number > $1",
@@ -128,6 +129,7 @@ async def mark_final(
         "aave_reserve_updated_events",
         "chainlink_price_events",
         "dex_swap_events",
+        "svr_oracle_configs",
     ]:
         await conn.execute(
             f"UPDATE {table} SET is_final = true WHERE block_number <= $1 AND is_final = false",
