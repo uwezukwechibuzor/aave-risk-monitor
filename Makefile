@@ -1,4 +1,5 @@
-.PHONY: install up down migrate backfill substreams-backfill index snapshot signals backtest api \
+.PHONY: install up down migrate backfill substreams-backfill backfill-svr-liquidations \
+        index snapshot signals backtest api \
         test lint contracts-test reset fmt typecheck reconcile gen-proto
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
@@ -32,6 +33,9 @@ reset:
 # ── Data pipeline ─────────────────────────────────────────────────────────────
 backfill:
 	python -m risk.cmd.backfill
+
+backfill-svr-liquidations:
+	python -m risk.cmd.backfill_svr_liquidations
 
 substreams-backfill:
 	python -m risk.cmd.substreams_backfill
