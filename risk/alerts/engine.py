@@ -38,13 +38,16 @@ async def evaluate_and_alert(
     )
 
     async with db_pool.acquire() as conn:
-        # Get latest fired signals at this block
+        # Use DISTINCT ON to get only the latest row per key at this block.
+        # Signals may have been run more than once at the same block; without
+        # DISTINCT ON the engine would process duplicate rows and fire duplicate alerts.
         rows = await conn.fetch(
             """
-            SELECT signal, asset, scenario, value, threshold, fired, metadata
+            SELECT DISTINCT ON (signal, asset, scenario)
+                signal, asset, scenario, value, threshold, fired, metadata
             FROM signal_values
             WHERE block = $1
-            ORDER BY signal, asset, scenario
+            ORDER BY signal, asset, scenario, id DESC
             """,
             block,
         )
@@ -167,6 +170,7 @@ async def _save_alert(
             """
             INSERT INTO alerts (signal, asset, scenario, severity, message, block)
             VALUES ($1,$2,$3,$4,$5,$6)
+            ON CONFLICT (signal, asset, scenario, block) DO NOTHING
             """,
             signal,
             asset,
