@@ -141,10 +141,9 @@ async def overview_stats() -> dict[str, Any]:
                 SUM(total_collateral_base)/1e8   AS total_supply_usd,
                 SUM(total_debt_base)/1e8          AS total_borrow_usd,
                 (SUM(total_collateral_base) - SUM(total_debt_base))/1e8 AS tvl_usd,
-                COUNT(*)                          AS active_positions
+                COUNT(*) FILTER (WHERE total_debt_base > 0) AS active_positions
             FROM user_positions
             WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
-              AND health_factor < 999
         """)
         users = await conn.fetchval("SELECT COUNT(*) FROM active_users")
         evts = await conn.fetchrow("""
