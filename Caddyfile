@@ -1,7 +1,8 @@
 # Aave Risk Monitor — Caddy reverse proxy
 #
 # Usage (with a real domain):
-#   Set DOMAIN=risk.example.com in .env, then:
+#   Set DOMAIN=risk.example.com in .env (docker compose passes it as SITE_ADDRESS;
+#   when running natively, export SITE_ADDRESS=risk.example.com), then:
 #   caddy run --config Caddyfile
 #
 # Caddy auto-provisions a TLS certificate from Let's Encrypt.
@@ -9,8 +10,8 @@
 #
 # For local / IP-only access (no domain), use the :80 block below instead.
 
-{$DOMAIN:localhost} {
-    reverse_proxy localhost:{$API_PORT:8000} {
+{$SITE_ADDRESS:localhost} {
+    reverse_proxy {$API_UPSTREAM:localhost}:{$API_PORT:8000} {
         # Pass real client IP through to the app
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}

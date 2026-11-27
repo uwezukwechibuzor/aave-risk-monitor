@@ -35,7 +35,22 @@ async def run_migrations(dsn: str) -> None:
                 continue
             print(f"  applying {sql_file.name} ...")
             sql = sql_file.read_text()
-            await conn.execute(sql)
+            if "CONCURRENTLY" in sql.upper():
+                # CREATE INDEX CONCURRENTLY can't run in a transaction, and a
+                # multi-statement execute() is one implicit transaction — so run
+                # each statement on its own.
+                body = "\n".join(
+                    line for line in sql.splitlines() if not line.lstrip().startswith("--")
+                )
+                for stmt in (s.strip() for s in body.split(";")):
+                    if stmt:
+                        await conn.execute(stmt)
+            else:
+                await conn.execute(sql)
+            await conn.execute(
+                "INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING",
+                version,
+            )
             print(f"  done {sql_file.name}")
     finally:
         await conn.close()

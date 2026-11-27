@@ -81,7 +81,7 @@ def _fmt(v: Any) -> float:
 async def _warm_cache() -> None:
     """Pre-warm the slowest cache keys so the first user request is never cold."""
     import httpx
-    base = "http://127.0.0.1:8000"
+    base = f"http://127.0.0.1:{settings.api_port}"
     for path in [
         "/overview/stats",
         "/overview/activity",
