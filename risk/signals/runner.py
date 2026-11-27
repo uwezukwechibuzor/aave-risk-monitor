@@ -8,8 +8,9 @@ from typing import Any
 
 import asyncpg
 
+from risk.addresses import AAVE_ORACLE, WETH
 from risk.config import load_assets_config, load_signals_config
-from risk.rpc import EthRPC
+from risk.rpc import EthRPC, get_asset_price
 from risk.signals import (
     concentration,
     coverage,
@@ -35,6 +36,11 @@ async def run_all_signals(db_pool: asyncpg.Pool, rpc: EthRPC) -> None:
     block = int(block_row["block"])
     logger.info("Evaluating signals at block %d", block)
 
+    # Fetch ETH/USD price once — used to convert DEX WETH-denominated prices to USD
+    weth_price_raw = await get_asset_price(rpc, AAVE_ORACLE, WETH)
+    weth_price_usd = Decimal(str(weth_price_raw)) / Decimal("1e8")
+    logger.info("ETH/USD price: $%.2f", weth_price_usd)
+
     asset_configs = assets_config.get("assets", {})
     emode_config: dict[int, Any] = assets_config.get("emode_categories", {})
 
@@ -57,6 +63,7 @@ async def run_all_signals(db_pool: asyncpg.Pool, rpc: EthRPC) -> None:
                 block=block,
                 asset_symbol=symbol,
                 asset_address=address,
+                asset_decimals=decimals,
                 shocks=signals_config["liquidation_at_risk"]["shocks"],
                 emode_config=emode_config,
                 asset_to_emode_assets={symbol: eth_emode_addresses},
@@ -91,7 +98,8 @@ async def run_all_signals(db_pool: asyncpg.Pool, rpc: EthRPC) -> None:
         try:
             if lar_results and oracle_price_usd > 0:
                 # Use -0.20 shock as representative scenario
-                liq_debt_usd = lar_results.get("asset_depeg", {}).get("-0.2", Decimal("0"))
+                # lar_results values are in 8-decimal base currency; convert to USD
+                liq_debt_usd = lar_results.get("asset_depeg", {}).get("-0.2", Decimal("0")) / Decimal("1e8")
                 # collateral = debt / (1 + liquidation_bonus/10000)
                 # Approximate with liquidation_bonus = 10% (1050 bps)
                 liq_bonus = Decimal("1.05")
@@ -122,6 +130,7 @@ async def run_all_signals(db_pool: asyncpg.Pool, rpc: EthRPC) -> None:
                 oracle_price_raw=oracle_price_raw,
                 uniswap_pools=uniswap_pools,
                 decimals_asset=decimals,
+                weth_price_usd=weth_price_usd,
                 thresholds=signals_config["oracle_deviation"],
             )
         except Exception as e:

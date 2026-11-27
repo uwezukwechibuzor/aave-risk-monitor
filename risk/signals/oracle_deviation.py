@@ -139,6 +139,7 @@ async def compute_and_save(
     oracle_price_raw: int,  # 8-decimal USD
     uniswap_pools: list[dict[str, Any]],
     decimals_asset: int,
+    weth_price_usd: Decimal,
     thresholds: dict[str, Any],
 ) -> dict[str, Decimal]:
     """Compute oracle deviation for each Uniswap pool and save to DB."""
@@ -180,9 +181,10 @@ async def compute_and_save(
         # the DEX spot in ETH terms separately for reference.
         # The deviation_bps uses the fraction (oracle - dex_normalized) / dex_normalized
 
-        # Using oracle_price_usd directly vs a normalised DEX USD price
-        # TODO(verify): enrich with ETH/USD oracle for exact USD comparison
-        deviation = oracle_deviation_bps(oracle_price_usd, spot * oracle_price_usd)
+        # spot is in WETH-per-asset units (from the asset/WETH Uniswap pool).
+        # Multiply by weth_price_usd to get market price in USD.
+        market_price_usd = spot * weth_price_usd
+        deviation = oracle_deviation_bps(oracle_price_usd, market_price_usd)
 
         twap = await get_uniswap_twap_price(
             rpc, pool_address, asset_address, token0, decimals_asset, block=block
@@ -210,8 +212,7 @@ async def compute_and_save(
 
         results[f"deviation_bps_{fee}"] = deviation
         if twap is not None:
-            results[f"twap_bps_{fee}"] = oracle_deviation_bps(
-                oracle_price_usd, twap * oracle_price_usd
-            )
+            twap_market_usd = twap * weth_price_usd
+            results[f"twap_bps_{fee}"] = oracle_deviation_bps(oracle_price_usd, twap_market_usd)
 
     return results

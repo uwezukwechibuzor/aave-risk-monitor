@@ -35,10 +35,10 @@ assets:
     oracle_type: exchange_rate  # weETH/eETH rate + eETH/ETH
     dex_pools:
       uniswap_v3:
-        # weETH/WETH 0.05% fee tier
+        # weETH/WETH 0.05% fee tier — WETH is token0 (0xC02 < 0xCd5)
         - address: "0x7A415B19932c0105c82FDB6b720bb01B0CC2CAe3"
-          token0: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"  # weETH
-          token1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"  # WETH
+          token0: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"  # WETH (actual token0)
+          token1: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"  # weETH
           fee: 500
       curve:
         []  # TODO(verify): weETH Curve pool address

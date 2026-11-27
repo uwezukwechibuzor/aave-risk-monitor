@@ -65,6 +65,7 @@ async def compute(
     block: int,
     asset_symbol: str,
     asset_address: str,
+    asset_decimals: int,
     shocks: list[float],
     emode_config: dict[int, Any],
     asset_to_emode_assets: dict[str, list[str]],  # asset_symbol -> correlated addresses
@@ -164,7 +165,12 @@ async def compute(
             if pos.emode_category == ETH_EMODE_ID:
                 emode_thresh = EMODE_1_LIQ_THRESHOLD
 
-            asset_collateral_base = Decimal(str(row["atoken_balance"]))
+            # atoken_balance is in raw token units (e.g. 1.5e18 for 1.5 wstETH).
+            # total_collateral_base is in 8-decimal USD. Convert to the same unit:
+            #   collateral_usd_8dec = raw_balance * oracle_price_8dec / 10^decimals
+            asset_collateral_base = (
+                Decimal(str(row["atoken_balance"])) * current_price / Decimal(str(10**asset_decimals))
+            )
 
             # Scenario A: only this asset drops
             shocked_hf_depeg = shocked_health_factor(
