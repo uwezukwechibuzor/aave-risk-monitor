@@ -1,0 +1,48 @@
+# Aave Risk Monitor — Caddy reverse proxy
+#
+# Usage (with a real domain):
+#   Set DOMAIN=risk.example.com in .env, then:
+#   caddy run --config Caddyfile
+#
+# Caddy auto-provisions a TLS certificate from Let's Encrypt.
+# Port 80 and 443 must be open in your firewall/security group.
+#
+# For local / IP-only access (no domain), use the :80 block below instead.
+
+{$DOMAIN:localhost} {
+    reverse_proxy localhost:{$API_PORT:8000} {
+        # Pass real client IP through to the app
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # Health-check: Caddy will mark the upstream down if /health fails
+        health_uri    /health
+        health_interval 30s
+        health_timeout  5s
+    }
+
+    # Compress responses
+    encode gzip
+
+    # Security headers
+    header {
+        X-Content-Type-Options    nosniff
+        X-Frame-Options           DENY
+        Referrer-Policy           strict-origin-when-cross-origin
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/aave-risk-monitor.log {
+            roll_size     50mb
+            roll_keep     5
+        }
+        format json
+    }
+}
+
+# ── Uncomment for local / IP-only access (no TLS) ───────────────────────────
+# :80 {
+#     reverse_proxy localhost:{$API_PORT:8000}
+# }

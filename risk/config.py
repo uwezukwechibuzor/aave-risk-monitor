@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="")
     telegram_chat_id: str = Field(default="")
 
+    # API server
+    api_host: str = Field(default="0.0.0.0")
+    api_port: int = Field(default=8000, ge=1, le=65535)
+
     # Logging
     log_level: str = Field(default="INFO")
 
