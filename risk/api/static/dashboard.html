@@ -47,7 +47,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .range-btn.active,.range-btn:hover{background:var(--blue);color:#fff;border-color:var(--blue)}
 .sc-btn{padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;transition:all .15s;margin-right:4px}
 .sc-btn.active{background:#1e3a5f;color:var(--blue);border-color:var(--blue)}
-.table-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.table-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;overflow-x:auto;margin-bottom:16px}
 .table-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .table-title{font-size:14px;font-weight:600}
 table{width:100%;border-collapse:collapse}
@@ -78,7 +78,34 @@ tr:hover td{background:#161820}
 .fire-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;background:#3d1515;color:var(--red);margin-left:8px}
 .ok-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#1a3d2b;color:var(--green);margin-left:8px}
 .loading{display:flex;align-items:center;justify-content:center;height:200px;color:var(--muted);font-size:13px}
-@media(max-width:900px){.chart-grid.cols2,.chart-grid.cols3,.chart-grid.cols13{grid-template-columns:1fr}.stat-grid{grid-template-columns:repeat(2,1fr)}}
+.stat-grid-3{grid-template-columns:repeat(3,1fr)}
+.stat-grid-4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:1100px){.stat-grid-4{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:900px){
+  .chart-grid.cols2,.chart-grid.cols3,.chart-grid.cols13{grid-template-columns:1fr}
+  .stat-grid,.stat-grid-3,.stat-grid-4{grid-template-columns:repeat(2,1fr)!important}
+  .chart-box{height:220px}
+  .chart-box.tall{height:280px}
+  .main{padding:16px}
+  .chart-panel{padding:16px}
+}
+@media(max-width:600px){
+  .stat-grid,.stat-grid-3,.stat-grid-4{grid-template-columns:1fr 1fr!important}
+  .stat-value{font-size:20px}
+  .stat-card{padding:14px}
+  .page-title{font-size:18px;margin-bottom:14px}
+  .chart-box{height:180px}
+  .chart-box.tall{height:220px}
+  .main{padding:8px}
+  .chart-panel{padding:12px}
+  .header{padding:0 12px;height:48px}
+  .header .badge{display:none}
+  .nav{padding:0 6px;gap:0}
+  .tab-btn{padding:9px 8px;font-size:11px}
+  th{padding:8px 10px;font-size:10px;letter-spacing:0}
+  td{padding:8px 10px;font-size:12px}
+  .header-right span:last-child{display:none}
+}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 </style>
 </head>
@@ -194,7 +221,7 @@ tr:hover td{background:#161820}
 <!-- LIQUIDATIONS -->
 <div id="tab-liquidations" class="tab-content">
   <div class="page-title">Liquidations</div>
-  <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stat-grid stat-grid-3">
     <div class="stat-card"><div class="stat-label">Total Liquidations</div><div class="stat-value" id="liq-count">–</div></div>
     <div class="stat-card"><div class="stat-label">Total Volume (USD)</div><div class="stat-value" id="liq-volume">–</div></div>
     <div class="stat-card"><div class="stat-label">Total Bonus Captured</div><div class="stat-value" id="liq-bonus">–</div></div>
@@ -322,7 +349,7 @@ tr:hover td{background:#161820}
 <!-- ALERTS -->
 <div id="tab-alerts" class="tab-content">
   <div class="page-title">Alerts</div>
-  <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stat-grid stat-grid-3">
     <div class="stat-card"><div class="stat-label">Total Alerts</div><div class="stat-value" id="alert-total">–</div></div>
     <div class="stat-card"><div class="stat-label">Critical</div><div class="stat-value" id="alert-critical" style="color:var(--red)">–</div></div>
     <div class="stat-card"><div class="stat-label">Warning</div><div class="stat-value" id="alert-warning" style="color:var(--yellow)">–</div></div>
@@ -349,7 +376,7 @@ tr:hover td{background:#161820}
     </div>
   </div>
 
-  <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-grid stat-grid-4">
     <div class="stat-card"><div class="stat-label">SVR Assets (Core Market)</div><div class="stat-value" id="svr-asset-count">–</div></div>
     <div class="stat-card"><div class="stat-label">SVR Liquidations (30D)</div><div class="stat-value" id="svr-liq-30d">–</div></div>
     <div class="stat-card"><div class="stat-label">Bonus Recaptured (30D)</div><div class="stat-value" id="svr-bonus-30d">–</div></div>
@@ -428,7 +455,7 @@ function eModeLabel(e){return e===0?'–':e===1?'ETH':e===2?'Stable':'E'+e}
 
 function mkChart(id,opts){const el=document.getElementById(id);if(!el)return null;const c=echarts.init(el,'dark');c.setOption(opts);window.addEventListener('resize',()=>c.resize());return c}
 const bg={backgroundColor:'transparent'};
-const grid={left:'60px',right:'20px',top:'20px',bottom:'40px'};
+const grid={left:'60px',right:'20px',top:'20px',bottom:'60px'};
 
 async function api(path){const r=await fetch(path);if(!r.ok)throw new Error(r.status+' '+path);return r.json()}
 
@@ -471,7 +498,7 @@ async function loadOverview(){
 function renderActChart(days){
   const f=days.slice(-actDays);
   if(!actChart)actChart=mkChart('activity-chart',{});
-  actChart.setOption({...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},legend:{data:['Supply','Borrow','Repay','Withdraw','Liquidations'],bottom:0,textStyle:{color:'#9aa0a6'}},grid,xAxis:{type:'category',data:f.map(d=>d.day),axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6'}},series:[{name:'Supply',type:'bar',stack:'t',data:f.map(d=>d.supply||0),itemStyle:{color:'#34a853'}},{name:'Borrow',type:'bar',stack:'t',data:f.map(d=>d.borrow||0),itemStyle:{color:'#4285f4'}},{name:'Repay',type:'bar',stack:'t',data:f.map(d=>d.repay||0),itemStyle:{color:'#00bcd4'}},{name:'Withdraw',type:'bar',stack:'t',data:f.map(d=>d.withdraw||0),itemStyle:{color:'#fbbc04'}},{name:'Liquidations',type:'bar',stack:'t',data:f.map(d=>d.liquidation||0),itemStyle:{color:'#ea4335'}}]});
+  actChart.setOption({...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},legend:{data:['Supply','Borrow','Repay','Withdraw','Liquidations'],top:5,type:'scroll',textStyle:{color:'#9aa0a6'}},grid:{left:'60px',right:'20px',top:'45px',bottom:'60px'},xAxis:{type:'category',data:f.map(d=>d.day),axisLabel:{color:'#9aa0a6',rotate:45,fontSize:10,hideOverlap:true}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmtN(v,0)}},series:[{name:'Supply',type:'bar',stack:'t',data:f.map(d=>d.supply||0),itemStyle:{color:'#34a853'}},{name:'Borrow',type:'bar',stack:'t',data:f.map(d=>d.borrow||0),itemStyle:{color:'#4285f4'}},{name:'Repay',type:'bar',stack:'t',data:f.map(d=>d.repay||0),itemStyle:{color:'#00bcd4'}},{name:'Withdraw',type:'bar',stack:'t',data:f.map(d=>d.withdraw||0),itemStyle:{color:'#fbbc04'}},{name:'Liquidations',type:'bar',stack:'t',data:f.map(d=>d.liquidation||0),itemStyle:{color:'#ea4335'}}]});
 }
 
 // MARKETS
@@ -488,10 +515,10 @@ async function loadMarkets(){
       <td style="color:#ea4335">${Number(a.borrow_apy).toFixed(2)}%</td>
       <td>${a.ltv}%</td><td>${a.liquidation_threshold}%</td><td>${a.liquidation_bonus}%</td>
     </tr>`).join('');
-    mkChart('supply-borrow-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['Supply','Borrow'],bottom:0,textStyle:{color:'#9aa0a6'}},grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},series:[{name:'Supply',type:'bar',data:assets.map(a=>a.supply_usd),itemStyle:{color:'#34a853'}},{name:'Borrow',type:'bar',data:assets.map(a=>a.borrow_usd),itemStyle:{color:'#4285f4'}}]});
-    mkChart('utilization-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',max:1,axisLabel:{color:'#9aa0a6',formatter:v=>(v*100).toFixed(0)+'%'}},series:[{type:'bar',data:assets.map(a=>({value:Number(a.utilization),itemStyle:{color:Number(a.utilization)>0.9?'#ea4335':Number(a.utilization)>0.7?'#fbbc04':'#34a853'}})),label:{show:true,position:'top',formatter:p=>(p.value*100).toFixed(1)+'%',color:'#e8eaed'}}]});
-    mkChart('supply-cap-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['Current Supply','Remaining Cap'],bottom:0,textStyle:{color:'#9aa0a6'}},grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},series:[{name:'Current Supply',type:'bar',stack:'c',data:assets.map(a=>Number(a.supply_usd)),itemStyle:{color:'#4285f4'}},{name:'Remaining Cap',type:'bar',stack:'c',data:assets.map(a=>Math.max(0,Number(a.supply_cap||0)-Number(a.supply_usd))),itemStyle:{color:'#1e2028'}}]});
-    mkChart('risk-params-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['LTV','Liq. Threshold','Liq. Bonus'],bottom:0,textStyle:{color:'#9aa0a6'}},grid:{left:'60px',right:'20px',top:'20px',bottom:'50px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>v+'%'},max:100},series:[{name:'LTV',type:'bar',data:assets.map(a=>a.ltv),itemStyle:{color:'#4285f4'}},{name:'Liq. Threshold',type:'bar',data:assets.map(a=>a.liquidation_threshold),itemStyle:{color:'#fbbc04'}},{name:'Liq. Bonus',type:'bar',data:assets.map(a=>a.liquidation_bonus),itemStyle:{color:'#ea4335'}}]});
+    mkChart('supply-borrow-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['Supply','Borrow'],top:5,textStyle:{color:'#9aa0a6'}},grid:{left:'80px',right:'20px',top:'40px',bottom:'60px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6',rotate:30,hideOverlap:true}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},series:[{name:'Supply',type:'bar',data:assets.map(a=>a.supply_usd),itemStyle:{color:'#34a853'}},{name:'Borrow',type:'bar',data:assets.map(a=>a.borrow_usd),itemStyle:{color:'#4285f4'}}]});
+    mkChart('utilization-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'80px',right:'20px',top:'20px',bottom:'60px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6',rotate:30,hideOverlap:true}},yAxis:{type:'value',max:1,axisLabel:{color:'#9aa0a6',formatter:v=>(v*100).toFixed(0)+'%'}},series:[{type:'bar',data:assets.map(a=>({value:Number(a.utilization),itemStyle:{color:Number(a.utilization)>0.9?'#ea4335':Number(a.utilization)>0.7?'#fbbc04':'#34a853'}})),label:{show:true,position:'top',formatter:p=>(p.value*100).toFixed(1)+'%',color:'#e8eaed'}}]});
+    mkChart('supply-cap-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['Current Supply','Remaining Cap'],top:5,textStyle:{color:'#9aa0a6'}},grid:{left:'80px',right:'20px',top:'40px',bottom:'60px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6',rotate:30,hideOverlap:true}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},series:[{name:'Current Supply',type:'bar',stack:'c',data:assets.map(a=>Number(a.supply_usd)),itemStyle:{color:'#4285f4'}},{name:'Remaining Cap',type:'bar',stack:'c',data:assets.map(a=>Math.max(0,Number(a.supply_cap||0)-Number(a.supply_usd))),itemStyle:{color:'#1e2028'}}]});
+    mkChart('risk-params-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['LTV','Liq. Threshold','Liq. Bonus'],top:5,textStyle:{color:'#9aa0a6'}},grid:{left:'60px',right:'20px',top:'40px',bottom:'60px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6',rotate:30,hideOverlap:true}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>v+'%'},max:100},series:[{name:'LTV',type:'bar',data:assets.map(a=>a.ltv),itemStyle:{color:'#4285f4'}},{name:'Liq. Threshold',type:'bar',data:assets.map(a=>a.liquidation_threshold),itemStyle:{color:'#fbbc04'}},{name:'Liq. Bonus',type:'bar',data:assets.map(a=>a.liquidation_bonus),itemStyle:{color:'#ea4335'}}]});
   }catch(e){console.error('markets',e)}
 }
 
@@ -525,7 +552,7 @@ function renderLiqHistChart(hist){
   const labels=f.map(d=>d.day);
   const series=(hist.assets||[]).map((asset,i)=>({name:asset,type:'bar',stack:'t',data:f.map(d=>d[asset]||0),itemStyle:{color:COLORS[i%8]}}));
   if(!liqHistChart)liqHistChart=mkChart('liq-history-chart',{});
-  liqHistChart.setOption({...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},legend:{data:hist.assets||[],bottom:0,textStyle:{color:'#9aa0a6'}},grid,xAxis:{type:'category',data:labels,axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6'}},series});
+  liqHistChart.setOption({...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},legend:{data:hist.assets||[],top:5,type:'scroll',textStyle:{color:'#9aa0a6'}},grid:{left:'60px',right:'20px',top:'45px',bottom:'60px'},xAxis:{type:'category',data:labels,axisLabel:{color:'#9aa0a6',rotate:45,fontSize:10,hideOverlap:true}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6'}},series});
 }
 
 // WALLETS
@@ -585,7 +612,7 @@ async function loadLarHeatmap(){
 function loadDexChart(signals){
   const dex=signals.filter(s=>s.signal==='coverage_ratio');
   if(!dex.length)return;
-  mkChart('dex-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'60px',right:'20px',top:'30px',bottom:'80px'},xAxis:{type:'category',data:dex.map(s=>s.asset+'\n'+s.scenario),axisLabel:{color:'#9aa0a6',fontSize:10,interval:0}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6'},name:'Coverage',nameTextStyle:{color:'#9aa0a6'}},series:[{type:'bar',data:dex.map(s=>({value:Number(s.value),itemStyle:{color:Number(s.value)>=1?'#34a853':Number(s.value)>0.5?'#fbbc04':'#ea4335'}})),markLine:{data:[{yAxis:1,lineStyle:{color:'#ea4335',type:'dashed'},label:{formatter:'Min=1',color:'#ea4335'}}]},label:{show:true,position:'top',formatter:p=>Number(p.value).toFixed(3),color:'#9aa0a6'}}]});
+  mkChart('dex-chart',{...bg,tooltip:{trigger:'axis',formatter:p=>`${p[0].name}<br/>${p[0].seriesName}: ${Number(p[0].value).toFixed(3)}<br/><span style="color:#9aa0a6;font-size:11px">${dex[p[0].dataIndex]?.scenario||''}</span>`},grid:{left:'60px',right:'20px',top:'30px',bottom:'80px'},xAxis:{type:'category',data:dex.map(s=>s.asset),axisLabel:{color:'#9aa0a6',fontSize:10,rotate:30,hideOverlap:true}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6'},name:'Coverage',nameTextStyle:{color:'#9aa0a6'}},series:[{type:'bar',data:dex.map(s=>({value:Number(s.value),itemStyle:{color:Number(s.value)>=1?'#34a853':Number(s.value)>0.5?'#fbbc04':'#ea4335'}})),markLine:{data:[{yAxis:1,lineStyle:{color:'#ea4335',type:'dashed'},label:{formatter:'Min=1',color:'#ea4335'}}]},label:{show:true,position:'top',formatter:p=>Number(p.value).toFixed(3),color:'#9aa0a6'}}]});
 }
 
 async function loadOracleHeatmap(){
@@ -604,14 +631,14 @@ async function loadHFHeatmap(){
     if(!h.cells||!h.cells.length){document.getElementById('hf-heatmap').innerHTML='<div class="loading">Need multiple snapshots — run signals daily for trend data</div>';return}
     const bands=h.rows,dates=h.cols,data=h.cells.map(c=>[dates.indexOf(c.col),bands.indexOf(c.row),Number(c.value)]);
     const mx=Math.max(...data.map(d=>d[2]),1);
-    mkChart('hf-heatmap',{...bg,tooltip:{formatter:p=>`${bands[p.data[1]]}<br/>${dates[p.data[0]]}<br/>${fmt$(p.data[2])} debt`},grid:{left:'100px',right:'100px',top:'10px',bottom:'60px'},xAxis:{type:'category',data:dates,axisLabel:{color:'#9aa0a6',rotate:45,fontSize:9}},yAxis:{type:'category',data:bands,axisLabel:{color:'#9aa0a6',fontSize:11}},visualMap:{min:0,max:mx,calculable:true,orient:'vertical',right:0,top:'center',inRange:{color:['#1e2028','#4285f4','#ea4335']},textStyle:{color:'#9aa0a6'},formatter:v=>fmt$(v)},series:[{type:'heatmap',data}]});
+    mkChart('hf-heatmap',{...bg,tooltip:{formatter:p=>`${bands[p.data[1]]}<br/>${dates[p.data[0]]}<br/>${fmt$(p.data[2])} debt`},grid:{left:'100px',right:'100px',top:'10px',bottom:'60px'},xAxis:{type:'category',data:dates,axisLabel:{color:'#9aa0a6',rotate:45,fontSize:9,hideOverlap:true}},yAxis:{type:'category',data:bands,axisLabel:{color:'#9aa0a6',fontSize:11}},visualMap:{min:0,max:mx,calculable:true,orient:'vertical',right:0,top:'center',inRange:{color:['#1e2028','#4285f4','#ea4335']},textStyle:{color:'#9aa0a6'},formatter:v=>fmt$(v)},series:[{type:'heatmap',data}]});
   }catch(e){}
 }
 
 function loadConcentrationChart(signals){
   const conc=signals.filter(s=>s.signal==='concentration');
   if(!conc.length)return;
-  mkChart('concentration-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'60px',right:'20px',top:'20px',bottom:'60px'},xAxis:{type:'category',data:conc.map(s=>s.asset),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',max:100,axisLabel:{color:'#9aa0a6',formatter:v=>v+'%'}},series:[{name:'Top-10 Share',type:'bar',data:conc.map(s=>({value:Number(s.value),itemStyle:{color:Number(s.value)>80?'#ea4335':Number(s.value)>60?'#fbbc04':'#34a853'}})),label:{show:true,position:'top',formatter:p=>p.value.toFixed(1)+'%',color:'#9aa0a6'}}]});
+  mkChart('concentration-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'60px',right:'20px',top:'20px',bottom:'65px'},xAxis:{type:'category',data:conc.map(s=>s.asset),axisLabel:{color:'#9aa0a6',rotate:30,hideOverlap:true}},yAxis:{type:'value',max:100,axisLabel:{color:'#9aa0a6',formatter:v=>v+'%'}},series:[{name:'Top-10 Share',type:'bar',data:conc.map(s=>({value:Number(s.value),itemStyle:{color:Number(s.value)>80?'#ea4335':Number(s.value)>60?'#fbbc04':'#34a853'}})),label:{show:true,position:'top',formatter:p=>p.value.toFixed(1)+'%',color:'#9aa0a6'}}]});
 }
 
 // ALERTS
@@ -671,11 +698,11 @@ async function loadSvr(){
     const days=d.daily_bonus,assets=d.daily_assets;
     const svrSyms=new Set(d.svr_assets.map(a=>a.symbol));
     if(days.length>0){
-      mkChart('svr-daily-chart',{...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
-        legend:{data:assets,bottom:0,textStyle:{color:'#9aa0a6'}},
-        grid,
-        xAxis:{type:'category',data:days.map(x=>x.date),axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},
-        yAxis:{type:'value',axisLabel:{color:'#9aa0a6'}},
+      mkChart('svr-daily-chart',{...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'},valueFormatter:v=>fmt$(v)},
+        legend:{data:assets,top:5,type:'scroll',textStyle:{color:'#9aa0a6'}},
+        grid:{left:'80px',right:'20px',top:'45px',bottom:'60px'},
+        xAxis:{type:'category',data:days.map(x=>x.date),axisLabel:{color:'#9aa0a6',rotate:45,fontSize:10,hideOverlap:true}},
+        yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},
         series:assets.map((a,i)=>({name:a,type:'bar',stack:'t',
           data:days.map(x=>x[a]||0),
           itemStyle:{color:COLORS[i%8],opacity:svrSyms.has(a)?1:0.4}}))
@@ -689,8 +716,8 @@ async function loadSvr(){
     // Bonus bar (USD, SVR assets highlighted green)
     const ba=d.bonus_all_time.filter(a=>a.bonus_usd>0);
     mkChart('svr-bonus-bar',{...bg,tooltip:{trigger:'axis',formatter:p=>`${p[0].name}<br/>${fmt$(p[0].value)}`},
-      grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},
-      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},
+      grid:{left:'80px',right:'20px',top:'20px',bottom:'65px'},
+      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6',rotate:45,fontSize:10,hideOverlap:true}},
       yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},
       series:[{type:'bar',
         data:ba.map(a=>({value:a.bonus_usd,itemStyle:{color:a.is_svr?'#34a853':'#4285f4'}})),
@@ -699,8 +726,8 @@ async function loadSvr(){
 
     // Avg bonus per liquidation (USD)
     mkChart('svr-rate-chart',{...bg,tooltip:{trigger:'axis',formatter:p=>`${p[0].name}<br/>${fmt$(p[0].value)}/liq`},
-      grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},
-      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},
+      grid:{left:'80px',right:'20px',top:'20px',bottom:'65px'},
+      xAxis:{type:'category',data:ba.map(a=>a.asset),axisLabel:{color:'#9aa0a6',rotate:45,fontSize:10,hideOverlap:true}},
       yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)},name:'$/Liq'},
       series:[{type:'bar',
         data:ba.map(a=>({value:a.count>0?a.bonus_usd/a.count:0,
