@@ -3,451 +3,600 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Aave Collateral Stress Monitor</title>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<title>Aave Risk Monitor — LlamaRisk</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <style>
-  :root {
-    --bg: #0d1117;
-    --bg2: #161b22;
-    --bg3: #21262d;
-    --border: #30363d;
-    --text: #c9d1d9;
-    --text-muted: #8b949e;
-    --accent: #58a6ff;
-    --warn: #d29922;
-    --crit: #f85149;
-    --ok: #3fb950;
-    --font: 'Segoe UI', system-ui, sans-serif;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; }
-
-  header {
-    background: var(--bg2);
-    border-bottom: 1px solid var(--border);
-    padding: 12px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
-  header h1 { font-size: 18px; font-weight: 600; color: var(--accent); }
-  .header-stats { display: flex; gap: 24px; font-size: 12px; color: var(--text-muted); }
-  .header-stats span { display: flex; align-items: center; gap: 4px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .dot-ok { background: var(--ok); }
-  .dot-warn { background: var(--warn); }
-  .dot-crit { background: var(--crit); }
-
-  main { padding: 20px 24px; display: grid; gap: 20px; max-width: 1600px; margin: 0 auto; }
-  .card {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
-  }
-  .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
-  .card h2 small { color: var(--text-muted); font-weight: 400; margin-left: 8px; }
-
-  .toggle-row { display: flex; gap: 8px; margin-bottom: 12px; }
-  .toggle-btn {
-    padding: 4px 12px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    background: var(--bg3);
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 12px;
-  }
-  .toggle-btn.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-  }
-
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
-
-  .chart { width: 100%; }
-
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { text-align: left; padding: 6px 10px; background: var(--bg3); color: var(--text-muted);
-       border-bottom: 1px solid var(--border); font-weight: 500; }
-  td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
-  tr:hover td { background: var(--bg3); }
-
-  .badge {
-    display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 500;
-  }
-  .badge-ok { background: #1a3a2a; color: var(--ok); }
-  .badge-warn { background: #2d2200; color: var(--warn); }
-  .badge-crit { background: #2d1a1a; color: var(--crit); }
-
-  #refresh-countdown { font-size: 11px; color: var(--text-muted); }
-  .loading { text-align: center; color: var(--text-muted); padding: 40px; }
-  .error { color: var(--crit); font-size: 12px; padding: 8px; }
-
-  @media (max-width: 900px) {
-    .grid-2, .grid-3 { grid-template-columns: 1fr; }
-  }
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0b0d;--surface:#111318;--border:#1e2028;--text:#e8eaed;--muted:#9aa0a6;
+  --blue:#4285f4;--green:#34a853;--yellow:#fbbc04;--red:#ea4335;--purple:#a142f4;--cyan:#00bcd4;
+  --orange:#ff7043;--teal:#26a69a;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
+.header{background:#0d0e12;border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:56px;position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;color:var(--text)}
+.logo svg{width:24px;height:24px}
+.badge{background:#1e3a5f;color:var(--blue);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.header-right{display:flex;align-items:center;gap:16px;color:var(--muted);font-size:12px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;margin-right:4px}
+.status-dot.red{background:var(--red)}
+.nav{background:#0d0e12;border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:4px;overflow-x:auto}
+.tab-btn{padding:12px 16px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;font-weight:500;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--blue);border-bottom-color:var(--blue)}
+.main{padding:24px;max-width:1400px;margin:0 auto}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.page-title{font-size:24px;font-weight:700;margin-bottom:20px;color:var(--text)}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}
+.stat-label{font-size:12px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+.stat-value{font-size:26px;font-weight:700;color:var(--text);line-height:1}
+.chart-grid{display:grid;gap:16px;margin-bottom:16px}
+.chart-grid.cols2{grid-template-columns:1fr 1fr}
+.chart-grid.cols3{grid-template-columns:1fr 1fr 1fr}
+.chart-grid.cols13{grid-template-columns:2fr 1fr}
+.chart-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}
+.chart-panel.full{grid-column:1/-1}
+.chart-title{font-size:14px;font-weight:600;margin-bottom:4px;color:var(--text)}
+.chart-sub{font-size:11px;color:var(--muted);margin-bottom:16px}
+.chart-box{width:100%;height:280px}
+.chart-box.tall{height:360px}
+.range-btns{display:flex;gap:4px;margin-bottom:12px}
+.range-btn{padding:3px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;cursor:pointer;transition:all .15s}
+.range-btn.active,.range-btn:hover{background:var(--blue);color:#fff;border-color:var(--blue)}
+.sc-btn{padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;transition:all .15s;margin-right:4px}
+.sc-btn.active{background:#1e3a5f;color:var(--blue);border-color:var(--blue)}
+.table-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.table-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.table-title{font-size:14px;font-weight:600}
+table{width:100%;border-collapse:collapse}
+th{padding:10px 16px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border);font-weight:500;background:#0d0e12}
+td{padding:10px 16px;border-bottom:1px solid #161820;font-size:13px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#161820}
+.addr{font-family:monospace;font-size:11px;color:var(--muted)}
+.addr a{color:var(--blue);text-decoration:none}
+.addr a:hover{text-decoration:underline}
+.badge-pill{padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.pill-green{background:#1a3d2b;color:var(--green)}
+.pill-yellow{background:#3d2f0a;color:var(--yellow)}
+.pill-red{background:#3d1515;color:var(--red)}
+.pill-blue{background:#1e3a5f;color:var(--blue)}
+.pill-gray{background:#1e2028;color:var(--muted)}
+.hf-bar{width:60px;height:6px;border-radius:3px;background:#1e2028;display:inline-block;vertical-align:middle;position:relative;overflow:hidden}
+.hf-bar-fill{height:100%;border-radius:3px;background:var(--green)}
+.sev-critical{background:#3d1515;color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700}
+.sev-warning{background:#3d2f0a;color:var(--yellow);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700}
+.sev-info{background:#1e2028;color:var(--muted);padding:2px 8px;border-radius:4px;font-size:11px}
+.signal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px}
+.signal-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}
+.signal-fired{border-color:var(--red)}
+.signal-name{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:6px}
+.signal-val{font-size:22px;font-weight:700;margin-bottom:4px}
+.signal-meta{font-size:11px;color:var(--muted)}
+.fire-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;background:#3d1515;color:var(--red);margin-left:8px}
+.ok-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#1a3d2b;color:var(--green);margin-left:8px}
+.loading{display:flex;align-items:center;justify-content:center;height:200px;color:var(--muted);font-size:13px}
+@media(max-width:900px){.chart-grid.cols2,.chart-grid.cols3,.chart-grid.cols13{grid-template-columns:1fr}.stat-grid{grid-template-columns:repeat(2,1fr)}}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Aave Collateral Stress Monitor</h1>
-  <div class="header-stats">
-    <span id="hdr-block">Block: —</span>
-    <span id="hdr-finality">Finality: —</span>
-    <span id="hdr-lag">Lag: —</span>
-    <span id="hdr-snapshot">Last snapshot: —</span>
-    <span id="refresh-countdown">Refresh in 60s</span>
+<div class="header">
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+    Risk Intelligence
+    <span class="badge">Aave v3 · Ethereum</span>
   </div>
-</header>
-
-<main>
-  <!-- Hero: Liquidation-at-Risk heatmap -->
-  <div class="card">
-    <h2>Liquidation-at-Risk Heatmap <small>USD at risk per shock level</small></h2>
-    <div class="toggle-row">
-      <button class="toggle-btn active" onclick="switchScenario('asset_depeg', this)">Asset Depeg</button>
-      <button class="toggle-btn" onclick="switchScenario('market_wide', this)">Market-Wide</button>
-    </div>
-    <div id="heatmap-lar" class="chart" style="height:220px;"></div>
+  <div class="header-right">
+    <span id="rpc-status"><span class="status-dot"></span>Live</span>
+    <span id="last-refresh">–</span>
   </div>
+</div>
 
-  <div class="grid-2">
-    <!-- Health Factor heatmap -->
-    <div class="card">
-      <h2>Health Factor Distribution <small>Debt by HF band over time</small></h2>
-      <div id="heatmap-hf" class="chart" style="height:240px;"></div>
-    </div>
-    <!-- Oracle Deviation heatmap -->
-    <div class="card">
-      <h2>Oracle Deviation <small>Median basis points by hour (UTC)</small></h2>
-      <div id="heatmap-oracle" class="chart" style="height:240px;"></div>
-    </div>
+<div class="nav">
+  <button class="tab-btn active" onclick="showTab('overview')">Overview</button>
+  <button class="tab-btn" onclick="showTab('markets')">Markets</button>
+  <button class="tab-btn" onclick="showTab('liquidations')">Liquidations</button>
+  <button class="tab-btn" onclick="showTab('wallets')">Wallets</button>
+  <button class="tab-btn" onclick="showTab('signals')">Risk Signals</button>
+  <button class="tab-btn" onclick="showTab('alerts')">Alerts</button>
+  <button class="tab-btn" onclick="showTab('activity')">Activity</button>
+</div>
+
+<div class="main">
+
+<!-- OVERVIEW -->
+<div id="tab-overview" class="tab-content active">
+  <div class="page-title">Protocol Overview</div>
+  <div class="stat-grid">
+    <div class="stat-card"><div class="stat-label">Total Supply</div><div class="stat-value" id="st-supply">–</div></div>
+    <div class="stat-card"><div class="stat-label">Total Borrow</div><div class="stat-value" id="st-borrow">–</div></div>
+    <div class="stat-card"><div class="stat-label">TVL</div><div class="stat-value" id="st-tvl">–</div></div>
+    <div class="stat-card"><div class="stat-label">Active Positions</div><div class="stat-value" id="st-positions">–</div></div>
+    <div class="stat-card"><div class="stat-label">Total Users</div><div class="stat-value" id="st-users">–</div></div>
+    <div class="stat-card"><div class="stat-label">Liquidations (24h)</div><div class="stat-value" id="st-liq24">–</div></div>
+    <div class="stat-card"><div class="stat-label">Total Liquidations</div><div class="stat-value" id="st-liqtotal">–</div></div>
+    <div class="stat-card"><div class="stat-label">DEX Swaps Indexed</div><div class="stat-value" id="st-dex">–</div></div>
   </div>
-
-  <!-- Coverage panel -->
-  <div class="card">
-    <h2>DEX Coverage <small>Capacity vs liquidatable collateral (-20% shock)</small></h2>
-    <div id="chart-coverage" class="chart" style="height:200px;"></div>
-  </div>
-
-  <div class="grid-2">
-    <!-- Active Alerts -->
-    <div class="card">
-      <h2>Active Alerts</h2>
-      <div id="alerts-table"><div class="loading">Loading…</div></div>
-    </div>
-
-    <!-- Latest Signals -->
-    <div class="card">
-      <h2>Latest Signal Values</h2>
-      <div id="signals-table"><div class="loading">Loading…</div></div>
+  <div class="chart-grid">
+    <div class="chart-panel full">
+      <div class="chart-title">Protocol Activity Over Time</div>
+      <div class="chart-sub">Daily event counts — Supply, Borrow, Repay, Withdraw, Liquidations</div>
+      <div class="range-btns">
+        <button class="range-btn active" onclick="setActivityDays(30,this)">30D</button>
+        <button class="range-btn" onclick="setActivityDays(60,this)">60D</button>
+        <button class="range-btn" onclick="setActivityDays(90,this)">90D</button>
+      </div>
+      <div id="activity-chart" class="chart-box tall"></div>
     </div>
   </div>
-
-  <!-- Backtest summary -->
-  <div class="card">
-    <h2>Backtest Summary <small>Historical fire rates and recommended thresholds</small></h2>
-    <div id="backtest-table"><div class="loading">Loading…</div></div>
+  <div class="chart-grid cols2">
+    <div class="chart-panel">
+      <div class="chart-title">Event Composition</div>
+      <div class="chart-sub">Total events by type (90 days)</div>
+      <div id="event-pie-chart" class="chart-box"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">Recent Protocol Events</div>
+      <div class="chart-sub">Latest supply / borrow / repay / withdraw</div>
+      <div style="max-height:280px;overflow-y:auto">
+        <table><thead><tr><th>Type</th><th>Asset</th><th>User</th><th>Amount</th></tr></thead>
+        <tbody id="mini-events-body"></tbody></table>
+      </div>
+    </div>
   </div>
-</main>
+</div>
+
+<!-- MARKETS -->
+<div id="tab-markets" class="tab-content">
+  <div class="page-title">Markets</div>
+  <div class="table-panel">
+    <div class="table-header"><span class="table-title">Asset Summary</span></div>
+    <table>
+      <thead><tr>
+        <th>Asset</th><th>Price</th><th>Total Supply</th><th>Total Borrow</th>
+        <th>Utilization</th><th>Supply APY</th><th>Borrow APY</th>
+        <th>LTV</th><th>Liq. Threshold</th><th>Liq. Bonus</th>
+      </tr></thead>
+      <tbody id="markets-tbody"></tbody>
+    </table>
+  </div>
+  <div class="chart-grid cols2">
+    <div class="chart-panel">
+      <div class="chart-title">Supply vs Borrow (USD)</div>
+      <div class="chart-sub">Latest snapshot per asset</div>
+      <div id="supply-borrow-chart" class="chart-box"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">Utilization Rate</div>
+      <div class="chart-sub">Current borrow utilization per asset</div>
+      <div id="utilization-chart" class="chart-box"></div>
+    </div>
+  </div>
+  <div class="chart-grid cols2">
+    <div class="chart-panel">
+      <div class="chart-title">Supply Cap Headroom</div>
+      <div class="chart-sub">Remaining capacity before supply cap</div>
+      <div id="supply-cap-chart" class="chart-box"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">Risk Parameters</div>
+      <div class="chart-sub">LTV, Liquidation Threshold & Bonus per asset</div>
+      <div id="risk-params-chart" class="chart-box"></div>
+    </div>
+  </div>
+</div>
+
+<!-- LIQUIDATIONS -->
+<div id="tab-liquidations" class="tab-content">
+  <div class="page-title">Liquidations</div>
+  <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+    <div class="stat-card"><div class="stat-label">Total Liquidations</div><div class="stat-value" id="liq-count">–</div></div>
+    <div class="stat-card"><div class="stat-label">Total Volume (USD)</div><div class="stat-value" id="liq-volume">–</div></div>
+    <div class="stat-card"><div class="stat-label">Total Bonus Captured</div><div class="stat-value" id="liq-bonus">–</div></div>
+  </div>
+  <div class="chart-grid">
+    <div class="chart-panel full">
+      <div class="chart-title">Liquidations By Collateral Asset Over Time</div>
+      <div class="chart-sub">Daily count of liquidation events, coloured by collateral seized</div>
+      <div class="range-btns">
+        <button class="range-btn active" onclick="setLiqDays(30,this)">30D</button>
+        <button class="range-btn" onclick="setLiqDays(60,this)">60D</button>
+        <button class="range-btn" onclick="setLiqDays(90,this)">90D</button>
+      </div>
+      <div id="liq-history-chart" class="chart-box tall"></div>
+    </div>
+  </div>
+  <div class="chart-grid cols2">
+    <div class="chart-panel">
+      <div class="chart-title">Collateral Seized Breakdown</div>
+      <div class="chart-sub">By collateral asset type</div>
+      <div id="liq-pie-chart" class="chart-box"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">Debt Asset Distribution</div>
+      <div class="chart-sub">What was repaid during liquidations</div>
+      <div id="debt-pie-chart" class="chart-box"></div>
+    </div>
+  </div>
+  <div class="table-panel">
+    <div class="table-header"><span class="table-title">Recent Liquidations</span></div>
+    <table>
+      <thead><tr>
+        <th>Block</th><th>Collateral</th><th>Debt</th><th>Borrower</th>
+        <th>Liquidator</th><th>Debt Covered</th><th>Collateral Seized</th><th>Time</th>
+      </tr></thead>
+      <tbody id="liq-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- WALLETS -->
+<div id="tab-wallets" class="tab-content">
+  <div class="page-title">Wallets</div>
+  <div class="chart-grid cols13">
+    <div class="chart-panel">
+      <div class="chart-title">Health Factor Distribution</div>
+      <div class="chart-sub">Number of borrowing positions per HF band</div>
+      <div id="hf-dist-chart" class="chart-box tall"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">E-Mode Adoption</div>
+      <div class="chart-sub">Positions by e-mode category</div>
+      <div id="emode-pie-chart" class="chart-box tall"></div>
+    </div>
+  </div>
+  <div class="chart-grid cols2">
+    <div class="table-panel">
+      <div class="table-header"><span class="table-title">Top Borrowers</span></div>
+      <table>
+        <thead><tr><th>#</th><th>Address</th><th>Borrow (USD)</th><th>Supply (USD)</th><th>Health Factor</th><th>E-Mode</th></tr></thead>
+        <tbody id="borrowers-tbody"></tbody>
+      </table>
+    </div>
+    <div class="table-panel">
+      <div class="table-header"><span class="table-title">Top Suppliers</span></div>
+      <table>
+        <thead><tr><th>#</th><th>Address</th><th>Supply (USD)</th><th>Borrow (USD)</th><th>Health Factor</th><th>E-Mode</th></tr></thead>
+        <tbody id="suppliers-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="chart-grid cols2">
+    <div class="chart-panel">
+      <div class="chart-title">Debt by Health Factor Band</div>
+      <div class="chart-sub">Total debt USD at risk in each HF range</div>
+      <div id="hf-debt-chart" class="chart-box"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">Top Borrowers — Supply vs Borrow</div>
+      <div class="chart-sub">Scatter: dot size = borrow size, color = risk level</div>
+      <div id="top-borrow-chart" class="chart-box"></div>
+    </div>
+  </div>
+</div>
+
+<!-- RISK SIGNALS -->
+<div id="tab-signals" class="tab-content">
+  <div class="page-title">Risk Signals</div>
+  <div class="signal-grid" id="signal-cards"></div>
+  <div class="chart-grid">
+    <div class="chart-panel full">
+      <div class="chart-title">Liquidation-at-Risk Heatmap</div>
+      <div class="chart-sub">USD at risk per asset × price shock level</div>
+      <button class="sc-btn active" onclick="setScenario('asset_depeg',this)">Asset Depeg</button>
+      <button class="sc-btn" onclick="setScenario('market_wide',this)">Market-Wide</button>
+      <div id="lar-heatmap" class="chart-box" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="chart-grid cols2">
+    <div class="chart-panel">
+      <div class="chart-title">DEX Coverage Ratio</div>
+      <div class="chart-sub">DEX capacity vs liquidatable debt (≥1 = safe)</div>
+      <div id="dex-chart" class="chart-box"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">Oracle Deviation by Hour (UTC)</div>
+      <div class="chart-sub">Chainlink vs Uniswap spot deviation in basis points</div>
+      <div id="oracle-chart" class="chart-box"></div>
+    </div>
+  </div>
+  <div class="chart-grid cols2">
+    <div class="chart-panel">
+      <div class="chart-title">HF × Debt Heatmap Over Time</div>
+      <div class="chart-sub">Debt at risk migration across health factor bands</div>
+      <div id="hf-heatmap" class="chart-box"></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-title">Concentration Risk</div>
+      <div class="chart-sub">Top-10 supplier share per collateral asset</div>
+      <div id="concentration-chart" class="chart-box"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ALERTS -->
+<div id="tab-alerts" class="tab-content">
+  <div class="page-title">Alerts</div>
+  <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+    <div class="stat-card"><div class="stat-label">Total Alerts</div><div class="stat-value" id="alert-total">–</div></div>
+    <div class="stat-card"><div class="stat-label">Critical</div><div class="stat-value" id="alert-critical" style="color:var(--red)">–</div></div>
+    <div class="stat-card"><div class="stat-label">Warning</div><div class="stat-value" id="alert-warning" style="color:var(--yellow)">–</div></div>
+  </div>
+  <div class="table-panel">
+    <div class="table-header"><span class="table-title">Alert Feed</span></div>
+    <table>
+      <thead><tr><th>Severity</th><th>Signal</th><th>Asset</th><th>Scenario</th><th>Message</th><th>Block</th><th>Time</th><th>Status</th></tr></thead>
+      <tbody id="alerts-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ACTIVITY -->
+<div id="tab-activity" class="tab-content">
+  <div class="page-title">Recent Activity</div>
+  <div class="table-panel">
+    <div class="table-header"><span class="table-title">Latest Protocol Events</span></div>
+    <table>
+      <thead><tr><th>Block</th><th>Type</th><th>Asset</th><th>User</th><th>Amount (raw)</th><th>Time (approx)</th><th>Tx</th></tr></thead>
+      <tbody id="activity-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+</div>
 
 <script>
-const BASE = '';
-let currentScenario = 'asset_depeg';
-let countdown = 60;
+const COLORS=['#4285f4','#34a853','#fbbc04','#ea4335','#a142f4','#00bcd4','#ff7043','#26a69a'];
 
-const charts = {
-  lar: echarts.init(document.getElementById('heatmap-lar'), 'dark'),
-  hf: echarts.init(document.getElementById('heatmap-hf'), 'dark'),
-  oracle: echarts.init(document.getElementById('heatmap-oracle'), 'dark'),
-  coverage: echarts.init(document.getElementById('chart-coverage'), 'dark'),
-};
+function fmt$(v,d=1){if(v===null||v===undefined)return'–';const n=Number(v);if(n>=1e9)return'$'+(n/1e9).toFixed(d)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(d)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(d)+'K';return'$'+n.toFixed(2)}
+function fmtN(v,d=1){const n=Number(v);if(n>=1e9)return(n/1e9).toFixed(d)+'B';if(n>=1e6)return(n/1e6).toFixed(d)+'M';if(n>=1e3)return(n/1e3).toFixed(d)+'K';return n.toFixed(d)}
+function fmtHF(v){const n=Number(v);return n>=99?'∞':n.toFixed(3)}
+function shortAddr(a){return a?a.slice(0,6)+'…'+a.slice(-4):'–'}
+function timeAgo(ts){if(!ts)return'–';const d=new Date(ts),now=new Date(),s=Math.floor((now-d)/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
+function hfClass(v){const n=Number(v);if(n<1.05)return'pill-red';if(n<1.25)return'pill-yellow';return'pill-green'}
+function eModeLabel(e){return e===0?'–':e===1?'ETH':e===2?'Stable':'E'+e}
 
-Object.values(charts).forEach(c => c.resize());
-window.addEventListener('resize', () => Object.values(charts).forEach(c => c.resize()));
+function mkChart(id,opts){const el=document.getElementById(id);if(!el)return null;const c=echarts.init(el,'dark');c.setOption(opts);window.addEventListener('resize',()=>c.resize());return c}
+const bg={backgroundColor:'transparent'};
+const grid={left:'60px',right:'20px',top:'20px',bottom:'40px'};
 
-async function fetchJSON(url) {
-  const r = await fetch(BASE + url);
-  if (!r.ok) throw new Error(r.statusText);
-  return r.json();
+async function api(path){const r=await fetch(path);if(!r.ok)throw new Error(r.status+' '+path);return r.json()}
+
+const loaded={};
+function showTab(name){
+  document.querySelectorAll('.tab-btn').forEach(b=>{const t=b.getAttribute('onclick').match(/'([^']+)'/)[1];b.classList.toggle('active',t===name)});
+  document.querySelectorAll('.tab-content').forEach(d=>d.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if(!loaded[name]){loaded[name]=true;loadTab(name)}
+}
+function loadTab(n){if(n==='overview')loadOverview();else if(n==='markets')loadMarkets();else if(n==='liquidations')loadLiquidations();else if(n==='wallets')loadWallets();else if(n==='signals')loadSignals();else if(n==='alerts')loadAlerts();else if(n==='activity')loadActivity()}
+
+let actDays=30,liqDays=30,scenario='asset_depeg';
+let _actData=null,_liqHistData=null,actChart=null,liqHistChart=null;
+
+function setActivityDays(d,btn){actDays=d;document.querySelectorAll('#tab-overview .range-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(_actData)renderActChart(_actData)}
+function setLiqDays(d,btn){liqDays=d;document.querySelectorAll('#tab-liquidations .range-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(_liqHistData)renderLiqHistChart(_liqHistData)}
+function setScenario(s,btn){scenario=s;document.querySelectorAll('.sc-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');loadLarHeatmap()}
+
+// OVERVIEW
+async function loadOverview(){
+  try{
+    const[stats,act,recent]=await Promise.all([api('/overview/stats'),api('/overview/activity'),api('/activity/recent?limit=20')]);
+    document.getElementById('st-supply').textContent=fmt$(stats.total_supply_usd);
+    document.getElementById('st-borrow').textContent=fmt$(stats.total_borrow_usd);
+    document.getElementById('st-tvl').textContent=fmt$(stats.tvl_usd);
+    document.getElementById('st-positions').textContent=fmtN(stats.active_positions,0);
+    document.getElementById('st-users').textContent=fmtN(stats.total_users,0);
+    document.getElementById('st-liq24').textContent=stats.liquidation_count_24h;
+    document.getElementById('st-liqtotal').textContent=fmtN(stats.liquidation_count,0);
+    document.getElementById('st-dex').textContent=fmtN(stats.dex_swap_count||0,0);
+    _actData=act.days;renderActChart(act.days);
+    mkChart('event-pie-chart',{...bg,tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},legend:{bottom:0,textStyle:{color:'#9aa0a6'},type:'scroll'},series:[{type:'pie',radius:['40%','70%'],center:['50%','45%'],data:[{name:'Supply',value:stats.supply_count,itemStyle:{color:'#34a853'}},{name:'Borrow',value:stats.borrow_count,itemStyle:{color:'#4285f4'}},{name:'Repay',value:stats.repay_count,itemStyle:{color:'#00bcd4'}},{name:'Withdraw',value:stats.withdraw_count,itemStyle:{color:'#fbbc04'}},{name:'Liquidations',value:stats.liquidation_count,itemStyle:{color:'#ea4335'}}],label:{show:false}}]});
+    const tbody=document.getElementById('mini-events-body');
+    const tc={'Supply':'pill-green','Borrow':'pill-red','Repay':'pill-blue','Withdraw':'pill-yellow'};
+    tbody.innerHTML=recent.events.slice(0,20).map(e=>`<tr><td><span class="badge-pill ${tc[e.event_type]||'pill-gray'}">${e.event_type}</span></td><td>${e.reserve||'–'}</td><td class="addr">${shortAddr(e.user)}</td><td>${fmtN(e.amount,2)}</td></tr>`).join('');
+  }catch(e){console.error('overview',e)}
 }
 
-function fmtUSD(v) {
-  if (!v) return '$0';
-  const n = parseFloat(v);
-  if (n >= 1e9) return '$' + (n/1e9).toFixed(2) + 'B';
-  if (n >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
-  if (n >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
-  return '$' + n.toFixed(2);
+function renderActChart(days){
+  const f=days.slice(-actDays);
+  if(!actChart)actChart=mkChart('activity-chart',{});
+  actChart.setOption({...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},legend:{data:['Supply','Borrow','Repay','Withdraw','Liquidations'],bottom:0,textStyle:{color:'#9aa0a6'}},grid,xAxis:{type:'category',data:f.map(d=>d.day),axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6'}},series:[{name:'Supply',type:'bar',stack:'t',data:f.map(d=>d.supply||0),itemStyle:{color:'#34a853'}},{name:'Borrow',type:'bar',stack:'t',data:f.map(d=>d.borrow||0),itemStyle:{color:'#4285f4'}},{name:'Repay',type:'bar',stack:'t',data:f.map(d=>d.repay||0),itemStyle:{color:'#00bcd4'}},{name:'Withdraw',type:'bar',stack:'t',data:f.map(d=>d.withdraw||0),itemStyle:{color:'#fbbc04'}},{name:'Liquidations',type:'bar',stack:'t',data:f.map(d=>d.liquidation||0),itemStyle:{color:'#ea4335'}}]});
 }
 
-function fmtRatio(v) {
-  if (v === null || v === undefined) return '—';
-  return parseFloat(v).toFixed(3) + 'x';
+// MARKETS
+async function loadMarkets(){
+  try{
+    const{assets}=await api('/markets/summary');
+    document.getElementById('markets-tbody').innerHTML=assets.map(a=>`<tr>
+      <td><strong>${a.symbol}</strong></td>
+      <td>$${Number(a.price_usd).toFixed(2)}</td>
+      <td>${fmt$(a.supply_usd)}</td>
+      <td>${fmt$(a.borrow_usd)}</td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="hf-bar"><div class="hf-bar-fill" style="width:${Math.min(Number(a.utilization)*100,100)}%;background:${Number(a.utilization)>0.9?'#ea4335':Number(a.utilization)>0.7?'#fbbc04':'#34a853'}"></div></div>${(Number(a.utilization)*100).toFixed(1)}%</div></td>
+      <td style="color:#34a853">${Number(a.supply_apy).toFixed(2)}%</td>
+      <td style="color:#ea4335">${Number(a.borrow_apy).toFixed(2)}%</td>
+      <td>${a.ltv}%</td><td>${a.liquidation_threshold}%</td><td>${a.liquidation_bonus}%</td>
+    </tr>`).join('');
+    mkChart('supply-borrow-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['Supply','Borrow'],bottom:0,textStyle:{color:'#9aa0a6'}},grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},series:[{name:'Supply',type:'bar',data:assets.map(a=>a.supply_usd),itemStyle:{color:'#34a853'}},{name:'Borrow',type:'bar',data:assets.map(a=>a.borrow_usd),itemStyle:{color:'#4285f4'}}]});
+    mkChart('utilization-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',max:1,axisLabel:{color:'#9aa0a6',formatter:v=>(v*100).toFixed(0)+'%'}},series:[{type:'bar',data:assets.map(a=>({value:Number(a.utilization),itemStyle:{color:Number(a.utilization)>0.9?'#ea4335':Number(a.utilization)>0.7?'#fbbc04':'#34a853'}})),label:{show:true,position:'top',formatter:p=>(p.value*100).toFixed(1)+'%',color:'#e8eaed'}}]});
+    mkChart('supply-cap-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['Current Supply','Remaining Cap'],bottom:0,textStyle:{color:'#9aa0a6'}},grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},series:[{name:'Current Supply',type:'bar',stack:'c',data:assets.map(a=>Number(a.supply_usd)),itemStyle:{color:'#4285f4'}},{name:'Remaining Cap',type:'bar',stack:'c',data:assets.map(a=>Math.max(0,Number(a.supply_cap||0)-Number(a.supply_usd))),itemStyle:{color:'#1e2028'}}]});
+    mkChart('risk-params-chart',{...bg,tooltip:{trigger:'axis'},legend:{data:['LTV','Liq. Threshold','Liq. Bonus'],bottom:0,textStyle:{color:'#9aa0a6'}},grid:{left:'60px',right:'20px',top:'20px',bottom:'50px'},xAxis:{type:'category',data:assets.map(a=>a.symbol),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>v+'%'},max:100},series:[{name:'LTV',type:'bar',data:assets.map(a=>a.ltv),itemStyle:{color:'#4285f4'}},{name:'Liq. Threshold',type:'bar',data:assets.map(a=>a.liquidation_threshold),itemStyle:{color:'#fbbc04'}},{name:'Liq. Bonus',type:'bar',data:assets.map(a=>a.liquidation_bonus),itemStyle:{color:'#ea4335'}}]});
+  }catch(e){console.error('markets',e)}
 }
 
-function severityBadge(s) {
-  const cls = s === 'critical' ? 'badge-crit' : (s === 'warning' ? 'badge-warn' : 'badge-ok');
-  return `<span class="badge ${cls}">${s}</span>`;
+// LIQUIDATIONS
+async function loadLiquidations(){
+  try{
+    const[stats,hist,recent]=await Promise.all([api('/liquidations/stats'),api('/liquidations/history'),api('/liquidations/recent?limit=50')]);
+    document.getElementById('liq-count').textContent=fmtN(stats.total_count,0);
+    document.getElementById('liq-volume').textContent=fmt$(stats.total_volume_usd);
+    document.getElementById('liq-bonus').textContent=fmt$(stats.total_bonus_usd);
+    _liqHistData=hist;renderLiqHistChart(hist);
+    const collMap={},debtMap={};
+    recent.liquidations.forEach(l=>{collMap[l.collateral_asset]=(collMap[l.collateral_asset]||0)+1;debtMap[l.debt_asset]=(debtMap[l.debt_asset]||0)+1});
+    mkChart('liq-pie-chart',{...bg,tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},legend:{bottom:0,textStyle:{color:'#9aa0a6'}},series:[{type:'pie',radius:['40%','70%'],data:Object.entries(collMap).map(([k,v],i)=>({name:k,value:v,itemStyle:{color:COLORS[i%8]}})),label:{show:false}}]});
+    mkChart('debt-pie-chart',{...bg,tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},legend:{bottom:0,textStyle:{color:'#9aa0a6'}},series:[{type:'pie',radius:['40%','70%'],data:Object.entries(debtMap).map(([k,v],i)=>({name:k,value:v,itemStyle:{color:COLORS[(i+2)%8]}})),label:{show:false}}]});
+    document.getElementById('liq-tbody').innerHTML=recent.liquidations.map(l=>`<tr>
+      <td>${l.block_number.toLocaleString()}</td>
+      <td><span class="badge-pill pill-yellow">${l.collateral_asset}</span></td>
+      <td><span class="badge-pill pill-blue">${l.debt_asset}</span></td>
+      <td class="addr"><a href="https://etherscan.io/address/${l.user}" target="_blank">${shortAddr(l.user)}</a></td>
+      <td class="addr"><a href="https://etherscan.io/address/${l.liquidator}" target="_blank">${shortAddr(l.liquidator)}</a></td>
+      <td>${fmtN(l.debt_to_cover,2)}</td><td>${fmtN(l.liquidated_collateral,2)}</td>
+      <td style="color:var(--muted)">${timeAgo(l.timestamp)}</td>
+    </tr>`).join('');
+  }catch(e){console.error('liquidations',e)}
 }
 
-// ── Health state ──────────────────────────────────────────────────────────────
-async function loadHealth() {
-  try {
-    const h = await fetchJSON('/health');
-    document.getElementById('hdr-lag').textContent =
-      h.indexer_lag_blocks != null ? `Lag: ${h.indexer_lag_blocks} blocks` : 'Lag: —';
-    document.getElementById('hdr-finality').innerHTML =
-      `<span class="dot ${h.rpc_ok ? 'dot-ok' : 'dot-crit'}"></span>RPC`;
-  } catch(e) {
-    document.getElementById('hdr-lag').textContent = 'Lag: error';
-  }
+function renderLiqHistChart(hist){
+  const ago=new Date();ago.setDate(ago.getDate()-liqDays);
+  const f=hist.days.filter(d=>new Date(d.day)>=ago);
+  const labels=f.map(d=>d.day);
+  const series=(hist.assets||[]).map((asset,i)=>({name:asset,type:'bar',stack:'t',data:f.map(d=>d[asset]||0),itemStyle:{color:COLORS[i%8]}}));
+  if(!liqHistChart)liqHistChart=mkChart('liq-history-chart',{});
+  liqHistChart.setOption({...bg,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},legend:{data:hist.assets||[],bottom:0,textStyle:{color:'#9aa0a6'}},grid,xAxis:{type:'category',data:labels,axisLabel:{color:'#9aa0a6',rotate:30,fontSize:10}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6'}},series});
 }
 
-// ── Latest snapshot block ─────────────────────────────────────────────────────
-async function loadLatestBlock() {
-  try {
-    const sv = await fetchJSON('/signals/latest');
-    if (sv.signals && sv.signals.length) {
-      const maxBlock = Math.max(...sv.signals.map(s => s.block));
-      document.getElementById('hdr-block').textContent = `Block: ${maxBlock.toLocaleString()}`;
-      document.getElementById('hdr-snapshot').textContent =
-        `Snapshot: ${new Date(sv.signals[0].ts).toLocaleTimeString()}`;
-    }
-  } catch(e) {}
+// WALLETS
+async function loadWallets(){
+  try{
+    const[hf,borrowers,suppliers,emode]=await Promise.all([api('/wallets/hf-distribution'),api('/wallets/top-borrowers'),api('/wallets/top-suppliers'),api('/wallets/emode-distribution')]);
+    const bands=hf.bands;
+    mkChart('hf-dist-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'160px',right:'20px',top:'20px',bottom:'40px'},xAxis:{type:'value',axisLabel:{color:'#9aa0a6'}},yAxis:{type:'category',data:bands.map(b=>b.band),axisLabel:{color:'#9aa0a6',fontSize:11}},series:[{type:'bar',data:bands.map(b=>({value:b.count,itemStyle:{color:b.band.toLowerCase().includes('liquid')||b.band.includes('1.0')?'#ea4335':b.band.includes('1.05')||b.band.toLowerCase().includes('danger')?'#ff7043':b.band.toLowerCase().includes('high')?'#fbbc04':'#34a853'}})),label:{show:true,position:'right',color:'#9aa0a6',formatter:p=>p.value.toLocaleString()}}]});
+    mkChart('hf-debt-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'160px',right:'20px',top:'20px',bottom:'40px'},xAxis:{type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)}},yAxis:{type:'category',data:bands.map(b=>b.band),axisLabel:{color:'#9aa0a6',fontSize:11}},series:[{type:'bar',data:bands.map(b=>({value:b.debt_usd,itemStyle:{color:b.band.toLowerCase().includes('liquid')||b.band.toLowerCase().includes('danger')?'#ea4335':'#4285f4'}})),label:{show:true,position:'right',color:'#9aa0a6',formatter:p=>fmt$(p.value)}}]});
+    mkChart('emode-pie-chart',{...bg,tooltip:{trigger:'item',formatter:'{b}<br/>Count: {c}'},legend:{bottom:0,textStyle:{color:'#9aa0a6'}},series:[{type:'pie',radius:['35%','65%'],center:['50%','45%'],data:emode.emodes.map((e,i)=>({name:e.label,value:e.count,itemStyle:{color:COLORS[i%8]}})),label:{show:true,formatter:'{b}\n{d}%',color:'#9aa0a6',fontSize:11}}]});
+    document.getElementById('borrowers-tbody').innerHTML=borrowers.wallets.map((w,i)=>`<tr><td style="color:var(--muted)">${i+1}</td><td class="addr"><a href="https://etherscan.io/address/${w.user}" target="_blank">${shortAddr(w.user)}</a></td><td>${fmt$(w.borrow_usd)}</td><td>${fmt$(w.supply_usd)}</td><td><span class="badge-pill ${hfClass(w.health_factor)}">${fmtHF(w.health_factor)}</span></td><td>${eModeLabel(w.emode)}</td></tr>`).join('');
+    document.getElementById('suppliers-tbody').innerHTML=suppliers.wallets.map((w,i)=>`<tr><td style="color:var(--muted)">${i+1}</td><td class="addr"><a href="https://etherscan.io/address/${w.user}" target="_blank">${shortAddr(w.user)}</a></td><td>${fmt$(w.supply_usd)}</td><td>${fmt$(w.borrow_usd)}</td><td><span class="badge-pill ${hfClass(w.health_factor)}">${fmtHF(w.health_factor)}</span></td><td>${eModeLabel(w.emode)}</td></tr>`).join('');
+    mkChart('top-borrow-chart',{...bg,tooltip:{trigger:'item',formatter:p=>`${shortAddr(p.name)}<br/>Supply: ${fmt$(p.data[0])}<br/>Borrow: ${fmt$(p.data[1])}<br/>HF: ${fmtHF(p.data[2])}`},grid:{left:'80px',right:'20px',top:'20px',bottom:'50px'},xAxis:{name:'Supply (USD)',type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)},nameTextStyle:{color:'#9aa0a6'}},yAxis:{name:'Borrow (USD)',type:'value',axisLabel:{color:'#9aa0a6',formatter:v=>fmt$(v)},nameTextStyle:{color:'#9aa0a6'}},series:[{type:'scatter',data:borrowers.wallets.map(w=>[w.supply_usd,w.borrow_usd,w.health_factor,w.user]),symbolSize:p=>Math.min(Math.max(Math.sqrt(Number(p[1])/10000),6),30),itemStyle:{color:p=>Number(p.data[2])<1.1?'#ea4335':Number(p.data[2])<1.5?'#fbbc04':'#4285f4',opacity:0.8}}]});
+  }catch(e){console.error('wallets',e)}
 }
 
-// ── Liquidation-at-risk heatmap ───────────────────────────────────────────────
-async function loadLarHeatmap(scenario) {
-  try {
-    const d = await fetchJSON(`/heatmap/liquidation?scenario=${scenario}`);
-    const data = [];
-    d.cells.forEach(c => {
-      data.push([c.col, c.row, parseFloat(c.value)]);
-    });
-    const maxVal = Math.max(1, ...data.map(d => d[2]));
-
-    charts.lar.setOption({
-      backgroundColor: 'transparent',
-      tooltip: {
-        formatter: p => `${p.data[1]} @ ${p.data[0]}<br>${fmtUSD(p.data[2])} at risk`,
-      },
-      grid: { top: 10, right: 80, bottom: 30, left: 80 },
-      xAxis: { type: 'category', data: d.cols, axisLabel: { color: '#8b949e' } },
-      yAxis: { type: 'category', data: d.rows, axisLabel: { color: '#8b949e' } },
-      visualMap: {
-        min: 0, max: maxVal,
-        calculable: true,
-        orient: 'vertical',
-        right: 0, top: 10, bottom: 10,
-        inRange: { color: ['#0d1117', '#1a3a5c', '#58a6ff', '#d29922', '#f85149'] },
-        text: ['High', 'Low'],
-        textStyle: { color: '#8b949e' },
-      },
-      series: [{
-        name: 'LaR',
-        type: 'heatmap',
-        data: data,
-        label: { show: true, formatter: p => fmtUSD(p.data[2]), fontSize: 10, color: '#c9d1d9' },
-        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
-      }],
-    });
-  } catch(e) {
-    document.getElementById('heatmap-lar').innerHTML = `<div class="error">Failed: ${e.message}</div>`;
-  }
+// RISK SIGNALS
+async function loadSignals(){
+  try{
+    const{signals}=await api('/signals/latest');
+    const grouped={};
+    signals.forEach(s=>{const k=s.signal+'|'+s.asset;if(!grouped[k])grouped[k]={signal:s.signal,asset:s.asset,items:[]};grouped[k].items.push(s)});
+    document.getElementById('signal-cards').innerHTML=Object.values(grouped).map(g=>{
+      const fired=g.items.some(i=>i.fired);
+      const top=g.items.sort((a,b)=>Number(b.value)-Number(a.value))[0];
+      let display=Number(top.value),unit='';
+      if(g.signal==='liquidation_at_risk'){display=fmt$(display);unit='at risk'}
+      else if(g.signal==='coverage_ratio'){display=display.toFixed(3);unit='ratio'}
+      else if(g.signal==='oracle_deviation'){display=display.toFixed(1);unit='bps'}
+      else if(g.signal==='utilization'){display=(display*100).toFixed(1)+'%'}
+      else if(g.signal==='concentration'){display=display.toFixed(1)+'%';unit='top-10 share'}
+      else display=Number(top.value).toFixed(4);
+      return`<div class="signal-card${fired?' signal-fired':''}">
+        <div class="signal-name">${g.signal.replace(/_/g,' ')} — ${g.asset}${fired?'<span class="fire-badge">FIRED</span>':'<span class="ok-badge">OK</span>'}</div>
+        <div class="signal-val" style="color:${fired?'#ea4335':'#e8eaed'}">${display}</div>
+        <div class="signal-meta">${unit?unit+' | ':''}threshold: ${Number(top.threshold).toFixed(2)} | ${g.items.length} scenario(s)</div>
+      </div>`;
+    }).join('');
+    loadLarHeatmap();
+    loadDexChart(signals);
+    loadOracleHeatmap();
+    loadHFHeatmap();
+    loadConcentrationChart(signals);
+  }catch(e){console.error('signals',e)}
 }
 
-// ── Health factor heatmap ─────────────────────────────────────────────────────
-async function loadHfHeatmap() {
-  try {
-    const d = await fetchJSON('/heatmap/health-factor?days=30');
-    const data = d.cells.map(c => [c.col, c.row, parseFloat(c.value)]);
-    const maxVal = Math.max(1, ...data.map(d => d[2]));
-
-    charts.hf.setOption({
-      backgroundColor: 'transparent',
-      tooltip: { formatter: p => `${p.data[1]}<br>${p.data[0]}: ${fmtUSD(p.data[2])} debt` },
-      grid: { top: 10, right: 80, bottom: 60, left: 70 },
-      xAxis: { type: 'category', data: d.cols, axisLabel: { color: '#8b949e', rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'category', data: d.rows, axisLabel: { color: '#8b949e', fontSize: 10 } },
-      visualMap: {
-        min: 0, max: maxVal,
-        orient: 'vertical', right: 0, top: 10, bottom: 10,
-        inRange: { color: ['#0d1117', '#1a3a5c', '#58a6ff', '#f85149'] },
-        text: ['High', ''], textStyle: { color: '#8b949e' },
-      },
-      series: [{ type: 'heatmap', data: data }],
-    });
-  } catch(e) {}
+async function loadLarHeatmap(){
+  try{
+    const h=await api('/heatmap/liquidation?scenario='+scenario);
+    if(!h.cells||!h.cells.length){document.getElementById('lar-heatmap').innerHTML='<div class="loading">No heatmap data yet — run make signals</div>';return}
+    const assets=h.rows,shocks=h.cols,data=h.cells.map(c=>[shocks.indexOf(c.col),assets.indexOf(c.row),Number(c.value)]);
+    const mx=Math.max(...data.map(d=>d[2]),1);
+    mkChart('lar-heatmap',{...bg,tooltip:{formatter:p=>`${assets[p.data[1]]} @ ${shocks[p.data[0]]} shock<br/>${fmt$(p.data[2])} at risk`},grid:{left:'80px',right:'100px',top:'10px',bottom:'40px'},xAxis:{type:'category',data:shocks,axisLabel:{color:'#9aa0a6'}},yAxis:{type:'category',data:assets,axisLabel:{color:'#9aa0a6'}},visualMap:{min:0,max:mx,calculable:true,orient:'vertical',right:0,top:'center',inRange:{color:['#1e2028','#4285f4','#fbbc04','#ea4335']},textStyle:{color:'#9aa0a6'},formatter:v=>fmt$(v)},series:[{type:'heatmap',data,label:{show:true,formatter:p=>fmt$(p.data[2]),color:'#fff',fontSize:10}}]});
+  }catch(e){}
 }
 
-// ── Oracle deviation heatmap ──────────────────────────────────────────────────
-async function loadOracleHeatmap() {
-  try {
-    const d = await fetchJSON('/heatmap/oracle-deviation?days=30');
-    const data = d.cells.map(c => [c.col, c.row, parseFloat(c.value)]);
-    const maxAbs = Math.max(1, ...data.map(d => Math.abs(d[2])));
-
-    charts.oracle.setOption({
-      backgroundColor: 'transparent',
-      tooltip: { formatter: p => `${p.data[1]} hour ${p.data[0]}: ${parseFloat(p.data[2]).toFixed(1)} bps` },
-      grid: { top: 10, right: 80, bottom: 30, left: 70 },
-      xAxis: { type: 'category', data: d.cols, name: 'Hour (UTC)', nameLocation: 'center',
-               nameGap: 25, nameTextStyle: { color: '#8b949e' },
-               axisLabel: { color: '#8b949e', fontSize: 10 } },
-      yAxis: { type: 'category', data: d.rows, axisLabel: { color: '#8b949e', fontSize: 10 } },
-      visualMap: {
-        min: -maxAbs, max: maxAbs,
-        orient: 'vertical', right: 0, top: 10, bottom: 10,
-        inRange: { color: ['#f85149', '#0d1117', '#3fb950'] },
-        text: ['+bps', '-bps'], textStyle: { color: '#8b949e' },
-      },
-      series: [{ type: 'heatmap', data: data }],
-    });
-  } catch(e) {}
+function loadDexChart(signals){
+  const dex=signals.filter(s=>s.signal==='coverage_ratio');
+  if(!dex.length)return;
+  mkChart('dex-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'60px',right:'20px',top:'30px',bottom:'80px'},xAxis:{type:'category',data:dex.map(s=>s.asset+'\n'+s.scenario),axisLabel:{color:'#9aa0a6',fontSize:10,interval:0}},yAxis:{type:'value',axisLabel:{color:'#9aa0a6'},name:'Coverage',nameTextStyle:{color:'#9aa0a6'}},series:[{type:'bar',data:dex.map(s=>({value:Number(s.value),itemStyle:{color:Number(s.value)>=1?'#34a853':Number(s.value)>0.5?'#fbbc04':'#ea4335'}})),markLine:{data:[{yAxis:1,lineStyle:{color:'#ea4335',type:'dashed'},label:{formatter:'Min=1',color:'#ea4335'}}]},label:{show:true,position:'top',formatter:p=>Number(p.value).toFixed(3),color:'#9aa0a6'}}]});
 }
 
-// ── Coverage bar chart ────────────────────────────────────────────────────────
-async function loadCoverageChart() {
-  try {
-    const sv = await fetchJSON('/signals/latest');
-    const cov2 = {}, cov5 = {}, lar = {};
-    sv.signals.forEach(s => {
-      if (s.signal === 'coverage_ratio' && s.scenario === '2pct') cov2[s.asset] = parseFloat(s.value);
-      if (s.signal === 'coverage_ratio' && s.scenario === '5pct') cov5[s.asset] = parseFloat(s.value);
-      if (s.signal === 'liquidation_at_risk' && s.scenario.startsWith('asset_depeg:-0.2'))
-        lar[s.asset] = parseFloat(s.value);
-    });
-
-    const assets = [...new Set(sv.signals.map(s => s.asset))];
-    charts.coverage.setOption({
-      backgroundColor: 'transparent',
-      tooltip: { trigger: 'axis' },
-      legend: { textStyle: { color: '#8b949e' }, top: 0 },
-      grid: { top: 40, bottom: 30, left: 60, right: 20 },
-      xAxis: { type: 'category', data: assets, axisLabel: { color: '#8b949e' } },
-      yAxis: { type: 'value', axisLabel: { color: '#8b949e' },
-               name: 'Coverage ratio', nameTextStyle: { color: '#8b949e' } },
-      series: [
-        { name: '2% impact', type: 'bar', data: assets.map(a => cov2[a] ?? 0),
-          itemStyle: { color: '#58a6ff' } },
-        { name: '5% impact', type: 'bar', data: assets.map(a => cov5[a] ?? 0),
-          itemStyle: { color: '#3fb950' } },
-        // Red line at coverage=1
-        { name: 'Coverage = 1', type: 'line', markLine: {
-            data: [{ yAxis: 1, lineStyle: { color: '#f85149', type: 'dashed' } }] },
-          data: [], showSymbol: false },
-      ],
-    });
-  } catch(e) {}
+async function loadOracleHeatmap(){
+  try{
+    const h=await api('/heatmap/oracle-deviation');
+    if(!h.cells||!h.cells.length){document.getElementById('oracle-chart').innerHTML='<div class="loading">No oracle deviation data yet</div>';return}
+    const assets=h.rows,hours=h.cols,data=h.cells.map(c=>[hours.indexOf(c.col),assets.indexOf(c.row),Number(c.value)]);
+    const mx=Math.max(...data.map(d=>Math.abs(d[2])),1);
+    mkChart('oracle-chart',{...bg,tooltip:{formatter:p=>`${assets[p.data[1]]} at ${p.data[0]}h UTC<br/>${Number(p.data[2]).toFixed(1)} bps`},grid:{left:'80px',right:'100px',top:'10px',bottom:'40px'},xAxis:{type:'category',data:hours,axisLabel:{color:'#9aa0a6'}},yAxis:{type:'category',data:assets,axisLabel:{color:'#9aa0a6'}},visualMap:{min:-mx,max:mx,calculable:true,orient:'vertical',right:0,top:'center',inRange:{color:['#ea4335','#1e2028','#34a853']},textStyle:{color:'#9aa0a6'}},series:[{type:'heatmap',data}]});
+  }catch(e){}
 }
 
-// ── Alerts table ──────────────────────────────────────────────────────────────
-async function loadAlerts() {
-  const el = document.getElementById('alerts-table');
-  try {
-    const d = await fetchJSON('/alerts');
-    if (!d.alerts.length) { el.innerHTML = '<div class="loading">No alerts</div>'; return; }
-    el.innerHTML = `<table>
-      <tr><th>Severity</th><th>Asset</th><th>Signal</th><th>Message</th><th>Block</th><th>Time</th></tr>
-      ${d.alerts.slice(0,20).map(a => `<tr>
-        <td>${severityBadge(a.severity)}</td>
-        <td>${a.asset}</td>
-        <td>${a.signal}</td>
-        <td>${a.message.split('\n')[0]}</td>
-        <td>${a.block.toLocaleString()}</td>
-        <td>${new Date(a.ts).toLocaleTimeString()}</td>
-      </tr>`).join('')}
-    </table>`;
-  } catch(e) {
-    el.innerHTML = `<div class="error">Failed: ${e.message}</div>`;
-  }
+async function loadHFHeatmap(){
+  try{
+    const h=await api('/heatmap/health-factor');
+    if(!h.cells||!h.cells.length){document.getElementById('hf-heatmap').innerHTML='<div class="loading">Need multiple snapshots — run signals daily for trend data</div>';return}
+    const bands=h.rows,dates=h.cols,data=h.cells.map(c=>[dates.indexOf(c.col),bands.indexOf(c.row),Number(c.value)]);
+    const mx=Math.max(...data.map(d=>d[2]),1);
+    mkChart('hf-heatmap',{...bg,tooltip:{formatter:p=>`${bands[p.data[1]]}<br/>${dates[p.data[0]]}<br/>${fmt$(p.data[2])} debt`},grid:{left:'100px',right:'100px',top:'10px',bottom:'60px'},xAxis:{type:'category',data:dates,axisLabel:{color:'#9aa0a6',rotate:45,fontSize:9}},yAxis:{type:'category',data:bands,axisLabel:{color:'#9aa0a6',fontSize:11}},visualMap:{min:0,max:mx,calculable:true,orient:'vertical',right:0,top:'center',inRange:{color:['#1e2028','#4285f4','#ea4335']},textStyle:{color:'#9aa0a6'},formatter:v=>fmt$(v)},series:[{type:'heatmap',data}]});
+  }catch(e){}
 }
 
-// ── Signals table ─────────────────────────────────────────────────────────────
-async function loadSignals() {
-  const el = document.getElementById('signals-table');
-  try {
-    const d = await fetchJSON('/signals/latest');
-    if (!d.signals.length) { el.innerHTML = '<div class="loading">No signals</div>'; return; }
-    el.innerHTML = `<table>
-      <tr><th>Signal</th><th>Asset</th><th>Scenario</th><th>Value</th><th>Threshold</th><th>Fired</th></tr>
-      ${d.signals.slice(0,30).map(s => `<tr>
-        <td>${s.signal}</td>
-        <td>${s.asset}</td>
-        <td>${s.scenario}</td>
-        <td>${parseFloat(s.value).toFixed(4)}</td>
-        <td>${parseFloat(s.threshold).toFixed(4)}</td>
-        <td>${s.fired ? '<span class="badge badge-crit">YES</span>' : '<span class="badge badge-ok">no</span>'}</td>
-      </tr>`).join('')}
-    </table>`;
-  } catch(e) {
-    el.innerHTML = `<div class="error">Failed: ${e.message}</div>`;
-  }
+function loadConcentrationChart(signals){
+  const conc=signals.filter(s=>s.signal==='concentration');
+  if(!conc.length)return;
+  mkChart('concentration-chart',{...bg,tooltip:{trigger:'axis'},grid:{left:'60px',right:'20px',top:'20px',bottom:'60px'},xAxis:{type:'category',data:conc.map(s=>s.asset),axisLabel:{color:'#9aa0a6'}},yAxis:{type:'value',max:100,axisLabel:{color:'#9aa0a6',formatter:v=>v+'%'}},series:[{name:'Top-10 Share',type:'bar',data:conc.map(s=>({value:Number(s.value),itemStyle:{color:Number(s.value)>80?'#ea4335':Number(s.value)>60?'#fbbc04':'#34a853'}})),label:{show:true,position:'top',formatter:p=>p.value.toFixed(1)+'%',color:'#9aa0a6'}}]});
 }
 
-// ── Backtest table ────────────────────────────────────────────────────────────
-async function loadBacktest() {
-  const el = document.getElementById('backtest-table');
-  try {
-    const d = await fetchJSON('/backtest/summary');
-    if (!d.summaries.length) { el.innerHTML = '<div class="loading">No backtest data</div>'; return; }
-    el.innerHTML = `<table>
-      <tr><th>Signal</th><th>Asset</th><th>Scenario</th><th>Fire rate</th><th>p50</th><th>p95</th><th>Rec. threshold</th></tr>
-      ${d.summaries.map(s => `<tr>
-        <td>${s.signal}</td>
-        <td>${s.asset}</td>
-        <td>${s.scenario}</td>
-        <td>${(parseFloat(s.fire_rate)*100).toFixed(1)}%</td>
-        <td>${parseFloat(s.p50).toFixed(4)}</td>
-        <td>${parseFloat(s.p95).toFixed(4)}</td>
-        <td>${parseFloat(s.recommended_threshold).toFixed(4)}</td>
-      </tr>`).join('')}
-    </table>`;
-  } catch(e) {
-    el.innerHTML = `<div class="error">Failed: ${e.message}</div>`;
-  }
+// ALERTS
+async function loadAlerts(){
+  try{
+    const{alerts}=await api('/alerts');
+    document.getElementById('alert-total').textContent=alerts.length;
+    document.getElementById('alert-critical').textContent=alerts.filter(a=>a.severity==='critical').length;
+    document.getElementById('alert-warning').textContent=alerts.filter(a=>a.severity==='warning').length;
+    document.getElementById('alerts-tbody').innerHTML=alerts.map(a=>`<tr>
+      <td><span class="${a.severity==='critical'?'sev-critical':a.severity==='warning'?'sev-warning':'sev-info'}">${a.severity.toUpperCase()}</span></td>
+      <td>${a.signal.replace(/_/g,' ')}</td><td>${a.asset}</td>
+      <td style="color:var(--muted);font-size:11px">${a.scenario}</td>
+      <td style="max-width:300px;font-size:12px">${a.message}</td>
+      <td>${a.block.toLocaleString()}</td>
+      <td style="color:var(--muted)">${timeAgo(a.ts)}</td>
+      <td>${a.resolved_at?'<span class="badge-pill pill-green">Resolved</span>':'<span class="badge-pill pill-red">Active</span>'}</td>
+    </tr>`).join('');
+  }catch(e){console.error('alerts',e)}
 }
 
-function switchScenario(scenario, btn) {
-  currentScenario = scenario;
-  document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  loadLarHeatmap(scenario);
+// ACTIVITY
+async function loadActivity(){
+  try{
+    const{events}=await api('/activity/recent?limit=100');
+    const tc={'Supply':'pill-green','Borrow':'pill-red','Repay':'pill-blue','Withdraw':'pill-yellow'};
+    document.getElementById('activity-tbody').innerHTML=events.map(e=>`<tr>
+      <td>${e.block_number.toLocaleString()}</td>
+      <td><span class="badge-pill ${tc[e.event_type]||'pill-gray'}">${e.event_type}</span></td>
+      <td>${e.reserve||'–'}</td>
+      <td class="addr"><a href="https://etherscan.io/address/${e.user}" target="_blank">${shortAddr(e.user)}</a></td>
+      <td>${fmtN(e.amount,2)}</td>
+      <td style="color:var(--muted)">${timeAgo(e.timestamp)}</td>
+      <td class="addr"><a href="https://etherscan.io/tx/${e.tx_hash}" target="_blank">${shortAddr(e.tx_hash)}</a></td>
+    </tr>`).join('');
+  }catch(e){console.error('activity',e)}
 }
 
-async function refresh() {
-  await Promise.all([
-    loadHealth(),
-    loadLatestBlock(),
-    loadLarHeatmap(currentScenario),
-    loadHfHeatmap(),
-    loadOracleHeatmap(),
-    loadCoverageChart(),
-    loadAlerts(),
-    loadSignals(),
-    loadBacktest(),
-  ]);
+// STATUS
+async function updateStatus(){
+  try{
+    const h=await api('/health');
+    document.getElementById('rpc-status').innerHTML=`<span class="status-dot${h.rpc_ok?'':' red'}"></span>${h.rpc_ok?'RPC Live':'RPC Down'} | DB: ${h.database}`;
+    document.getElementById('last-refresh').textContent='Updated '+timeAgo(h.timestamp);
+  }catch(e){}
 }
 
-// Auto-refresh countdown
-setInterval(() => {
-  countdown--;
-  document.getElementById('refresh-countdown').textContent = `Refresh in ${countdown}s`;
-  if (countdown <= 0) {
-    countdown = 60;
-    refresh();
-  }
-}, 1000);
-
-// Initial load
-refresh();
+loadOverview();loaded['overview']=true;
+updateStatus();
+setInterval(updateStatus,30000);
+setInterval(()=>{if(loaded['overview'])loadOverview();},60000);
 </script>
 </body>
 </html>
