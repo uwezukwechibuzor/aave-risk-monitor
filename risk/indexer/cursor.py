@@ -87,7 +87,6 @@ async def handle_reorg(
         "Reorg detected: rolling back to block %d for stream %s", undo_to_block, stream_id
     )
     for table in [
-        "raw_events",
         "aave_supply_events",
         "aave_withdraw_events",
         "aave_borrow_events",
@@ -121,7 +120,6 @@ async def mark_final(
 ) -> None:
     """Mark all events at or below finalized_block as is_final=true."""
     for table in [
-        "raw_events",
         "aave_supply_events",
         "aave_withdraw_events",
         "aave_borrow_events",

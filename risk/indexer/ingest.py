@@ -1,13 +1,13 @@
 """Event ingestion: write decoded events to Postgres in a single transaction.
 
-Each call to ingest_block() writes raw + domain events and updates the cursor
+Each call to ingest_block() writes domain events and updates the cursor
 atomically.  If the process crashes, the cursor is not advanced and the block
-is reprocessed on restart.
+is reprocessed on restart.  raw_events is no longer written to — all data
+lives in the typed domain tables.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -54,37 +54,9 @@ async def ingest_block(
             address = log.get("address", "")
 
             decoded = decode_log(log)
-
-            # Always write to raw_events
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO raw_events
-                        (block_number, block_hash, tx_hash, log_index, address,
-                         topic0, topics, data, decoded)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-                    ON CONFLICT (block_number, log_index) DO NOTHING
-                    """,
-                    block_number,
-                    block_hash,
-                    tx_hash,
-                    log_index,
-                    address,
-                    topic0,
-                    [t.lower() for t in topics],
-                    log.get("data", "0x"),
-                    json.dumps(decoded) if decoded else None,
-                )
-            except Exception as e:
-                logger.warning(
-                    "Failed to insert raw event at %d/%d: %s", block_number, log_index, e
-                )
-                continue
-
             if decoded is None:
                 continue
 
-            # Write to domain tables
             try:
                 await _write_domain_event(conn, topic0, block_number, tx_hash, log_index, decoded)
                 written += 1
