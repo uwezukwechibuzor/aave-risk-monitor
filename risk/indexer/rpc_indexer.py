@@ -37,7 +37,7 @@ from risk.rpc import EthRPC, RPCBudgetExceeded
 logger = logging.getLogger(__name__)
 
 STREAM_ID = "aave-v3-ethereum-rpc"
-CHUNK_SIZE = 500  # blocks per eth_getLogs call; keep small to avoid timeouts
+CHUNK_SIZE = 2000  # blocks per eth_getLogs call
 
 
 def _build_filter_config(settings: Settings, assets_config: dict[str, Any]) -> dict[str, Any]:
