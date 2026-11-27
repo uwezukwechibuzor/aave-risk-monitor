@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -40,6 +42,28 @@ settings = get_settings()
 STATIC_DIR = Path(__file__).parent / "static"
 RAY = 1e27
 SECONDS_PER_YEAR = 31_536_000
+
+# Simple in-memory TTL cache: key → (expires_at, value)
+_cache: dict[str, tuple[float, Any]] = {}
+_cache_lock = asyncio.Lock()
+
+
+async def _cached(key: str, ttl: float, fn: Any) -> Any:
+    """Return cached result if fresh, otherwise call fn() and cache the result."""
+    now = time.monotonic()
+    if key in _cache:
+        expires, val = _cache[key]
+        if now < expires:
+            return val
+    async with _cache_lock:
+        # Re-check under lock to avoid stampede
+        if key in _cache:
+            expires, val = _cache[key]
+            if now < expires:
+                return val
+        val = await fn()
+        _cache[key] = (now + ttl, val)
+    return val
 
 
 def _sym_map(assets_cfg: dict[str, Any]) -> dict[str, str]:
@@ -134,48 +158,52 @@ async def metrics() -> PlainTextResponse:
 
 @app.get("/overview/stats")
 async def overview_stats() -> dict[str, Any]:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        pos = await conn.fetchrow("""
-            SELECT
-                SUM(total_collateral_base)/1e8   AS total_supply_usd,
-                SUM(total_debt_base)/1e8          AS total_borrow_usd,
-                (SUM(total_collateral_base) - SUM(total_debt_base))/1e8 AS tvl_usd,
-                COUNT(*) FILTER (WHERE total_debt_base > 0) AS active_positions
-            FROM user_positions
-            WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
-        """)
-        users = await conn.fetchval("SELECT COUNT(*) FROM active_users")
-        evts = await conn.fetchrow("""
-            SELECT
-                (SELECT COUNT(*) FROM aave_supply_events)       AS supply,
-                (SELECT COUNT(*) FROM aave_borrow_events)       AS borrow,
-                (SELECT COUNT(*) FROM aave_repay_events)        AS repay,
-                (SELECT COUNT(*) FROM aave_withdraw_events)     AS withdraw,
-                (SELECT COUNT(*) FROM aave_liquidation_events)  AS liquidation,
-                (SELECT COUNT(*) FROM dex_swap_events)          AS dex_swaps
-        """)
-        head = await conn.fetchval(
-            "SELECT MAX(block_number) FROM indexer_cursor"
-        ) or 26_500_000
-        liq24 = await conn.fetchval(
-            "SELECT COUNT(*) FROM aave_liquidation_events WHERE block_number >= $1",
-            head - 7200,
-        )
-    return {
-        "total_supply_usd":    _fmt(pos["total_supply_usd"]),
-        "total_borrow_usd":    _fmt(pos["total_borrow_usd"]),
-        "tvl_usd":             _fmt(pos["tvl_usd"]),
-        "active_positions":    int(pos["active_positions"] or 0),
-        "total_users":         int(users or 0),
-        "supply_count":        int(evts["supply"] or 0),
-        "borrow_count":        int(evts["borrow"] or 0),
-        "repay_count":         int(evts["repay"] or 0),
-        "withdraw_count":      int(evts["withdraw"] or 0),
-        "liquidation_count":   int(evts["liquidation"] or 0),
-        "dex_swap_count":      int(evts["dex_swaps"] or 0),
-        "liquidation_count_24h": int(liq24 or 0),
-    }
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            # Single query: position stats + fast approximate event counts from pg_class
+            pos = await conn.fetchrow("""
+                SELECT
+                    SUM(total_collateral_base)/1e8   AS total_supply_usd,
+                    SUM(total_debt_base)/1e8          AS total_borrow_usd,
+                    (SUM(total_collateral_base) - SUM(total_debt_base))/1e8 AS tvl_usd,
+                    COUNT(*) FILTER (WHERE total_debt_base > 0) AS active_positions
+                FROM user_positions
+                WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
+            """)
+            users = await conn.fetchval("SELECT COUNT(*) FROM active_users")
+            # Approximate row counts from pg_class — O(1), no seq scan
+            evts = await conn.fetchrow("""
+                SELECT
+                    (SELECT reltuples::bigint FROM pg_class WHERE relname='aave_supply_events')       AS supply,
+                    (SELECT reltuples::bigint FROM pg_class WHERE relname='aave_borrow_events')       AS borrow,
+                    (SELECT reltuples::bigint FROM pg_class WHERE relname='aave_repay_events')        AS repay,
+                    (SELECT reltuples::bigint FROM pg_class WHERE relname='aave_withdraw_events')     AS withdraw,
+                    (SELECT reltuples::bigint FROM pg_class WHERE relname='aave_liquidation_events')  AS liquidation,
+                    (SELECT reltuples::bigint FROM pg_class WHERE relname='dex_swap_events')          AS dex_swaps
+            """)
+            head = await conn.fetchval(
+                "SELECT MAX(block_number) FROM indexer_cursor"
+            ) or 26_500_000
+            liq24 = await conn.fetchval(
+                "SELECT COUNT(*) FROM aave_liquidation_events WHERE block_number >= $1",
+                head - 7200,
+            )
+        return {
+            "total_supply_usd":    _fmt(pos["total_supply_usd"]),
+            "total_borrow_usd":    _fmt(pos["total_borrow_usd"]),
+            "tvl_usd":             _fmt(pos["tvl_usd"]),
+            "active_positions":    int(pos["active_positions"] or 0),
+            "total_users":         int(users or 0),
+            "supply_count":        int(evts["supply"] or 0),
+            "borrow_count":        int(evts["borrow"] or 0),
+            "repay_count":         int(evts["repay"] or 0),
+            "withdraw_count":      int(evts["withdraw"] or 0),
+            "liquidation_count":   int(evts["liquidation"] or 0),
+            "dex_swap_count":      int(evts["dex_swaps"] or 0),
+            "liquidation_count_24h": int(liq24 or 0),
+        }
+    return await _cached("overview_stats", 60.0, _fetch)
 
 
 @app.get("/overview/activity")
@@ -225,91 +253,93 @@ async def overview_activity(days: int = Query(90, ge=7, le=90)) -> dict[str, Any
 
 @app.get("/markets/summary")
 async def markets_summary() -> dict[str, Any]:
-    pool = get_pool()
-    assets_cfg = load_assets_config()
-    sym_map = _sym_map(assets_cfg)
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        assets_cfg = load_assets_config()
+        sym_map = _sym_map(assets_cfg)
 
-    async with pool.acquire() as conn:
-        snap_block = await conn.fetchval(
-            "SELECT MAX(snapshot_block) FROM user_reserve_positions"
-        )
-        pos_rows = await conn.fetch("""
-            SELECT reserve,
-                   SUM(atoken_balance)                AS supply_tokens,
-                   SUM(variable_debt + stable_debt)   AS borrow_tokens
-            FROM user_reserve_positions
-            WHERE snapshot_block = $1
-            GROUP BY reserve
-        """, snap_block)
+        async with pool.acquire() as conn:
+            snap_block = await conn.fetchval(
+                "SELECT MAX(snapshot_block) FROM user_reserve_positions"
+            )
+            pos_rows = await conn.fetch("""
+                SELECT reserve,
+                       SUM(atoken_balance)                AS supply_tokens,
+                       SUM(variable_debt + stable_debt)   AS borrow_tokens
+                FROM user_reserve_positions
+                WHERE snapshot_block = $1
+                GROUP BY reserve
+            """, snap_block)
+            price_rows = await conn.fetch(
+                "SELECT asset, price_usd FROM oracle_prices WHERE snapshot_block = $1", snap_block
+            )
+            cfg_rows = await conn.fetch(
+                """SELECT reserve, decimals, ltv, liquidation_threshold, liquidation_bonus,
+                          supply_cap, borrow_cap
+                   FROM reserve_configs WHERE snapshot_block = $1""", snap_block
+            )
+            rate_rows = await conn.fetch("""
+                SELECT DISTINCT ON (reserve)
+                    reserve, liquidity_rate, variable_borrow_rate
+                FROM aave_reserve_updated_events
+                ORDER BY reserve, block_number DESC
+            """)
+            util_rows = await conn.fetch("""
+                SELECT DISTINCT ON (asset) asset, value AS utilization
+                FROM signal_values
+                WHERE signal = 'utilization' AND scenario = 'utilization'
+                ORDER BY asset, block DESC
+            """)
 
-        price_rows = await conn.fetch(
-            "SELECT asset, price_usd FROM oracle_prices WHERE snapshot_block = $1", snap_block
-        )
-        cfg_rows = await conn.fetch(
-            """SELECT reserve, decimals, ltv, liquidation_threshold, liquidation_bonus,
-                      supply_cap, borrow_cap
-               FROM reserve_configs WHERE snapshot_block = $1""", snap_block
-        )
-        rate_rows = await conn.fetch("""
-            SELECT DISTINCT ON (reserve)
-                reserve, liquidity_rate, variable_borrow_rate
-            FROM aave_reserve_updated_events
-            ORDER BY reserve, block_number DESC
-        """)
-        util_rows = await conn.fetch("""
-            SELECT DISTINCT ON (asset) asset, value AS utilization
-            FROM signal_values
-            WHERE signal = 'utilization' AND scenario = 'utilization'
-            ORDER BY asset, block DESC
-        """)
+        prices  = {r["asset"].lower():   _fmt(r["price_usd"]) / 1e8 for r in price_rows}
+        cfgs    = {r["reserve"].lower(): r                           for r in cfg_rows}
+        rates   = {r["reserve"].lower(): r                           for r in rate_rows}
+        utils   = {r["asset"]:           _fmt(r["utilization"])      for r in util_rows}
 
-    prices  = {r["asset"].lower():   _fmt(r["price_usd"]) / 1e8 for r in price_rows}
-    cfgs    = {r["reserve"].lower(): r                           for r in cfg_rows}
-    rates   = {r["reserve"].lower(): r                           for r in rate_rows}
-    utils   = {r["asset"]:           _fmt(r["utilization"])      for r in util_rows}
+        assets = []
+        for row in pos_rows:
+            addr = row["reserve"].lower()
+            cfg  = cfgs.get(addr, {})
+            dec  = int(cfg.get("decimals", 18) if cfg else 18)
+            price = prices.get(addr, 0.0)
+            div   = 10 ** dec
 
-    assets = []
-    for row in pos_rows:
-        addr = row["reserve"].lower()
-        cfg  = cfgs.get(addr, {})
-        dec  = int(cfg.get("decimals", 18) if cfg else 18)
-        price = prices.get(addr, 0.0)
-        div   = 10 ** dec
+            supply_tokens = _fmt(row["supply_tokens"]) / div
+            borrow_tokens = _fmt(row["borrow_tokens"]) / div
+            supply_usd    = supply_tokens * price
+            borrow_usd    = borrow_tokens * price
 
-        supply_tokens = _fmt(row["supply_tokens"]) / div
-        borrow_tokens = _fmt(row["borrow_tokens"]) / div
-        supply_usd    = supply_tokens * price
-        borrow_usd    = borrow_tokens * price
+            rate = rates.get(addr, {})
+            supply_apy = _fmt(rate.get("liquidity_rate"))       / RAY * 100 if rate else 0.0
+            borrow_apy = _fmt(rate.get("variable_borrow_rate")) / RAY * 100 if rate else 0.0
 
-        rate = rates.get(addr, {})
-        supply_apy = _fmt(rate.get("liquidity_rate"))       / RAY * 100 if rate else 0.0
-        borrow_apy = _fmt(rate.get("variable_borrow_rate")) / RAY * 100 if rate else 0.0
+            symbol = sym_map.get(addr, addr[:8] + "…")
+            utilization = utils.get(symbol, borrow_usd / supply_usd if supply_usd > 0 else 0.0)
 
-        symbol = sym_map.get(addr, addr[:8] + "…")
-        utilization = utils.get(symbol, borrow_usd / supply_usd if supply_usd > 0 else 0.0)
+            lt  = _fmt(cfg.get("liquidation_threshold")) if cfg else 0.0
+            ltv = _fmt(cfg.get("ltv"))                   if cfg else 0.0
+            lb  = _fmt(cfg.get("liquidation_bonus"))      if cfg else 10500.0
 
-        lt  = _fmt(cfg.get("liquidation_threshold")) if cfg else 0.0
-        ltv = _fmt(cfg.get("ltv"))                   if cfg else 0.0
-        lb  = _fmt(cfg.get("liquidation_bonus"))      if cfg else 10500.0
+            assets.append({
+                "symbol":                symbol,
+                "address":               row["reserve"],
+                "supply_usd":            supply_usd,
+                "borrow_usd":            borrow_usd,
+                "utilization":           utilization,
+                "supply_apy":            round(supply_apy, 4),
+                "borrow_apy":            round(borrow_apy, 4),
+                "ltv":                   round(ltv / 100, 2),
+                "liquidation_threshold": round(lt / 100, 2),
+                "liquidation_bonus":     round((lb - 10000) / 100, 2),
+                "price_usd":             price,
+                "supply_cap":            _fmt(cfg.get("supply_cap")) if cfg else 0.0,
+                "borrow_cap":            _fmt(cfg.get("borrow_cap")) if cfg else 0.0,
+            })
 
-        assets.append({
-            "symbol":               symbol,
-            "address":              row["reserve"],
-            "supply_usd":           supply_usd,
-            "borrow_usd":           borrow_usd,
-            "utilization":          utilization,
-            "supply_apy":           round(supply_apy, 4),
-            "borrow_apy":           round(borrow_apy, 4),
-            "ltv":                  round(ltv / 100, 2),
-            "liquidation_threshold": round(lt / 100, 2),
-            "liquidation_bonus":    round((lb - 10000) / 100, 2),
-            "price_usd":            price,
-            "supply_cap":           _fmt(cfg.get("supply_cap")) if cfg else 0.0,
-            "borrow_cap":           _fmt(cfg.get("borrow_cap")) if cfg else 0.0,
-        })
+        assets.sort(key=lambda x: x["supply_usd"], reverse=True)
+        return {"assets": assets, "snapshot_block": snap_block}
 
-    assets.sort(key=lambda x: x["supply_usd"], reverse=True)
-    return {"assets": assets, "snapshot_block": snap_block}
+    return await _cached("markets_summary", 60.0, _fetch)
 
 
 # ── Liquidations ──────────────────────────────────────────────────────────────
@@ -644,36 +674,35 @@ async def stress(
             raise HTTPException(status_code=404, detail="No snapshot data available")
         block = int(block_row["block"])
 
-        rows = await conn.fetch(
-            """
-            SELECT scenario, value, metadata
-            FROM signal_values
-            WHERE signal = 'liquidation_at_risk' AND asset = $1
-              AND scenario LIKE $2 AND block = $3
-            ORDER BY scenario
-            """,
-            asset, f"{scenario}:%", block,
-        )
-
-    shocks: list[ShockResult] = []
-    for row in rows:
-        sc = str(row["scenario"])
-        shock_key = sc.split(":", 1)[1] if ":" in sc else sc
-        value = Decimal(str(row["value"]))
-        async with pool.acquire() as conn:
-            cov_rows = await conn.fetch(
+        # Fetch LAR rows and coverage in parallel — single connection, two queries
+        lar_rows, cov_rows = await asyncio.gather(
+            conn.fetch(
+                """
+                SELECT scenario, value, metadata
+                FROM signal_values
+                WHERE signal = 'liquidation_at_risk' AND asset = $1
+                  AND scenario LIKE $2 AND block = $3
+                ORDER BY scenario
+                """,
+                asset, f"{scenario}:%", block,
+            ),
+            conn.fetch(
                 "SELECT scenario, value FROM signal_values "
                 "WHERE signal='coverage_ratio' AND asset=$1 AND block=$2",
                 asset, block,
-            )
-        cov_map = {r["scenario"]: Decimal(str(r["value"])) for r in cov_rows}
-        shocks.append(ShockResult(
-            shock=shock_key,
-            liquidatable_debt_usd=value,
+            ),
+        )
+
+    cov_map = {r["scenario"]: Decimal(str(r["value"])) for r in cov_rows}
+    shocks = [
+        ShockResult(
+            shock=str(row["scenario"]).split(":", 1)[1] if ":" in str(row["scenario"]) else str(row["scenario"]),
+            liquidatable_debt_usd=Decimal(str(row["value"])),
             coverage_ratio_2pct=cov_map.get("2pct"),
             coverage_ratio_5pct=cov_map.get("5pct"),
-        ))
-
+        )
+        for row in lar_rows
+    ]
     return StressResponse(asset=asset, scenario=scenario, block=block, shocks=shocks)
 
 
@@ -776,26 +805,27 @@ async def heatmap_oracle_deviation(days: int = Query(30, ge=1, le=365)) -> Heatm
 
 @app.get("/signals/latest", response_model=SignalsResponse)
 async def signals_latest() -> SignalsResponse:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT DISTINCT ON (signal, asset, scenario)
-                signal, asset, scenario, block, value, threshold, fired, ts, metadata
-            FROM signal_values
-            ORDER BY signal, asset, scenario, block DESC
-            """
-        )
-    signals = [
-        SignalValue(
-            signal=r["signal"], asset=r["asset"], scenario=r["scenario"],
-            block=r["block"], value=Decimal(str(r["value"])),
-            threshold=Decimal(str(r["threshold"])), fired=bool(r["fired"]),
-            ts=r["ts"], metadata=r["metadata"],
-        )
-        for r in rows
-    ]
-    return SignalsResponse(signals=signals)
+    async def _fetch() -> SignalsResponse:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT ON (signal, asset, scenario)
+                    signal, asset, scenario, block, value, threshold, fired, ts, metadata
+                FROM signal_values
+                ORDER BY signal, asset, scenario, block DESC
+                """
+            )
+        return SignalsResponse(signals=[
+            SignalValue(
+                signal=r["signal"], asset=r["asset"], scenario=r["scenario"],
+                block=r["block"], value=Decimal(str(r["value"])),
+                threshold=Decimal(str(r["threshold"])), fired=bool(r["fired"]),
+                ts=r["ts"], metadata=r["metadata"],
+            )
+            for r in rows
+        ])
+    return await _cached("signals_latest", 30.0, _fetch)
 
 
 @app.get("/alerts", response_model=AlertsResponse)
@@ -880,10 +910,11 @@ _WETH_PROXY = "0x5424384B256154046E9667dDFaaa5e550145215e"
 
 @app.get("/svr/stats")
 async def svr_stats() -> dict[str, Any]:
-    import datetime as dt
+    async def _fetch() -> dict[str, Any]:
+        import datetime as dt
 
-    pool = get_pool()
-    sym_map = _sym_map(load_assets_config())
+        pool = get_pool()
+        sym_map = _sym_map(load_assets_config())
     async with pool.acquire() as conn:
         head = await conn.fetchval("SELECT MAX(snapshot_block) FROM oracle_prices") or 0
         head_block = await conn.fetchval("SELECT MAX(block_number) FROM indexer_cursor") or 0
@@ -1150,4 +1181,5 @@ async def svr_stats() -> dict[str, Any]:
         "daily_bonus": day_entries,
         "daily_assets": assets_seen,
         "snapshot_block": head,
-    }
+        }
+    return await _cached("svr_stats", 120.0, _fetch)
