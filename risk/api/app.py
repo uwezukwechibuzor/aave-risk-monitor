@@ -78,6 +78,29 @@ def _fmt(v: Any) -> float:
         return 0.0
 
 
+async def _warm_cache() -> None:
+    """Pre-warm the slowest cache keys so the first user request is never cold."""
+    import httpx
+    base = "http://127.0.0.1:8000"
+    for path in [
+        "/overview/stats",
+        "/overview/activity",
+        "/markets/summary",
+        "/liquidations/stats",
+        "/liquidations/history",
+        "/wallets/hf-distribution",
+        "/wallets/emode-distribution",
+        "/signals/latest",
+        "/alerts",
+        "/svr/stats",
+    ]:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await client.get(f"{base}{path}")
+        except Exception:
+            pass  # best-effort; server may not be fully bound yet
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_pool(settings.database_url)
@@ -87,6 +110,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         max_calls=settings.max_rpc_calls_per_run,
     )
     logger.info("API startup complete.")
+    # Pre-warm caches in the background so first user request is instant
+    asyncio.create_task(_warm_cache())
     yield
     await close_pool()
     await app.state.rpc.close()
@@ -208,45 +233,48 @@ async def overview_stats() -> dict[str, Any]:
 
 @app.get("/overview/activity")
 async def overview_activity(days: int = Query(90, ge=7, le=90)) -> dict[str, Any]:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        ref = await conn.fetchrow(
-            "SELECT MAX(snapshot_block) AS hb, MAX(snapshot_ts) AS ht FROM user_positions"
-        )
-        head_block = int(ref["hb"] or 26_500_000)
-        head_ts = ref["ht"] or datetime.now(UTC)
-        min_block = head_block - days * 7200
-
-        rows = await conn.fetch("""
-            WITH ref(hb, ht) AS (VALUES ($1::bigint, $2::timestamptz)),
-            combined AS (
-                SELECT block_number, 'supply'      AS etype FROM aave_supply_events      WHERE block_number >= $3
-                UNION ALL
-                SELECT block_number, 'borrow'                FROM aave_borrow_events      WHERE block_number >= $3
-                UNION ALL
-                SELECT block_number, 'repay'                 FROM aave_repay_events       WHERE block_number >= $3
-                UNION ALL
-                SELECT block_number, 'withdraw'              FROM aave_withdraw_events    WHERE block_number >= $3
-                UNION ALL
-                SELECT block_number, 'liquidation'           FROM aave_liquidation_events WHERE block_number >= $3
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            ref = await conn.fetchrow(
+                "SELECT MAX(snapshot_block) AS hb, MAX(snapshot_ts) AS ht FROM user_positions"
             )
-            SELECT
-                date_trunc('day', ht - ((hb - block_number) * interval '12 seconds')) AS day,
-                etype,
-                COUNT(*) AS cnt
-            FROM combined, ref
-            GROUP BY day, etype
-            ORDER BY day
-        """, head_block, head_ts, min_block)
+            head_block = int(ref["hb"] or 26_500_000)
+            head_ts = ref["ht"] or datetime.now(UTC)
+            min_block = head_block - days * 7200
 
-    day_map: dict[str, dict[str, Any]] = {}
-    for r in rows:
-        d = str(r["day"].date())
-        if d not in day_map:
-            day_map[d] = {"day": d, "supply": 0, "borrow": 0, "repay": 0, "withdraw": 0, "liquidation": 0}
-        day_map[d][r["etype"]] = int(r["cnt"])
+            rows = await conn.fetch("""
+                WITH ref(hb, ht) AS (VALUES ($1::bigint, $2::timestamptz)),
+                combined AS (
+                    SELECT block_number, 'supply'      AS etype FROM aave_supply_events      WHERE block_number >= $3
+                    UNION ALL
+                    SELECT block_number, 'borrow'                FROM aave_borrow_events      WHERE block_number >= $3
+                    UNION ALL
+                    SELECT block_number, 'repay'                 FROM aave_repay_events       WHERE block_number >= $3
+                    UNION ALL
+                    SELECT block_number, 'withdraw'              FROM aave_withdraw_events    WHERE block_number >= $3
+                    UNION ALL
+                    SELECT block_number, 'liquidation'           FROM aave_liquidation_events WHERE block_number >= $3
+                )
+                SELECT
+                    date_trunc('day', ht - ((hb - block_number) * interval '12 seconds')) AS day,
+                    etype,
+                    COUNT(*) AS cnt
+                FROM combined, ref
+                GROUP BY day, etype
+                ORDER BY day
+            """, head_block, head_ts, min_block)
 
-    return {"days": sorted(day_map.values(), key=lambda x: x["day"])}
+        day_map: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            d = str(r["day"].date())
+            if d not in day_map:
+                day_map[d] = {"day": d, "supply": 0, "borrow": 0, "repay": 0, "withdraw": 0, "liquidation": 0}
+            day_map[d][r["etype"]] = int(r["cnt"])
+
+        return {"days": sorted(day_map.values(), key=lambda x: x["day"])}
+
+    return await _cached(f"overview_activity_{days}", 300.0, _fetch)
 
 
 # ── Markets ───────────────────────────────────────────────────────────────────
@@ -346,11 +374,11 @@ async def markets_summary() -> dict[str, Any]:
 
 @app.get("/liquidations/stats")
 async def liquidations_stats() -> dict[str, Any]:
-    pool = get_pool()
-    assets_cfg = load_assets_config()
-    sym_map = _sym_map(assets_cfg)
+    async def _fetch() -> dict[str, Any]:
+      pool = get_pool()
+      assets_cfg = load_assets_config()
 
-    async with pool.acquire() as conn:
+      async with pool.acquire() as conn:
         snap_block = await conn.fetchval("SELECT MAX(snapshot_block) FROM oracle_prices") or 0
         price_rows = await conn.fetch(
             "SELECT asset, price_usd FROM oracle_prices WHERE snapshot_block = $1", snap_block
@@ -364,236 +392,254 @@ async def liquidations_stats() -> dict[str, Any]:
             FROM aave_liquidation_events
             GROUP BY collateral_asset, debt_asset
         """)
-        total_count = await conn.fetchval("SELECT COUNT(*) FROM aave_liquidation_events") or 0
+        # reltuples is O(1) vs COUNT(*) full scan
+        total_count = await conn.fetchval(
+            "SELECT reltuples::bigint FROM pg_class WHERE relname = 'aave_liquidation_events'"
+        ) or 0
 
-    prices = {r["asset"].lower(): _fmt(r["price_usd"]) / 1e8 for r in price_rows}
-    cfgs   = {r["reserve"].lower(): r for r in cfg_rows}
+      prices = {r["asset"].lower(): _fmt(r["price_usd"]) / 1e8 for r in price_rows}
+      cfgs   = {r["reserve"].lower(): r for r in cfg_rows}
 
-    total_volume_usd = 0.0
-    total_bonus_usd  = 0.0
-    for row in rows:
-        debt_addr = row["debt_asset"].lower()
-        coll_addr = row["collateral_asset"].lower()
-        d_dec = int(cfgs[debt_addr]["decimals"]) if debt_addr in cfgs else 18
-        c_dec = int(cfgs[coll_addr]["decimals"]) if coll_addr in cfgs else 18
-        d_price = prices.get(debt_addr, 0.0)
-        c_price = prices.get(coll_addr, 0.0)
-        lb = _fmt(cfgs[coll_addr].get("liquidation_bonus")) if coll_addr in cfgs else 10500.0
+      total_volume_usd = 0.0
+      total_bonus_usd  = 0.0
+      for row in rows:
+          debt_addr = row["debt_asset"].lower()
+          coll_addr = row["collateral_asset"].lower()
+          d_dec = int(cfgs[debt_addr]["decimals"]) if debt_addr in cfgs else 18
+          c_dec = int(cfgs[coll_addr]["decimals"]) if coll_addr in cfgs else 18
+          d_price = prices.get(debt_addr, 0.0)
+          c_price = prices.get(coll_addr, 0.0)
 
-        vol  = _fmt(row["total_debt"]) / (10**d_dec) * d_price
-        coll = _fmt(row["total_coll"]) / (10**c_dec) * c_price
-        bonus = coll - vol
-        total_volume_usd += vol
-        total_bonus_usd  += max(bonus, 0)
+          vol  = _fmt(row["total_debt"]) / (10**d_dec) * d_price
+          coll = _fmt(row["total_coll"]) / (10**c_dec) * c_price
+          bonus = coll - vol
+          total_volume_usd += vol
+          total_bonus_usd  += max(bonus, 0)
 
-    return {
-        "total_count":       int(total_count),
-        "total_volume_usd":  round(total_volume_usd, 2),
-        "total_bonus_usd":   round(total_bonus_usd, 2),
-    }
+      return {
+          "total_count":       int(total_count),
+          "total_volume_usd":  round(total_volume_usd, 2),
+          "total_bonus_usd":   round(total_bonus_usd, 2),
+      }
+
+    return await _cached("liquidations_stats", 60.0, _fetch)
 
 
 @app.get("/liquidations/history")
 async def liquidations_history(days: int = Query(90, ge=7, le=90)) -> dict[str, Any]:
-    pool = get_pool()
-    assets_cfg = load_assets_config()
-    sym_map = _sym_map(assets_cfg)
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        assets_cfg = load_assets_config()
+        sym_map = _sym_map(assets_cfg)
 
-    async with pool.acquire() as conn:
-        ref = await conn.fetchrow(
-            "SELECT MAX(snapshot_block) AS hb, MAX(snapshot_ts) AS ht FROM user_positions"
-        )
-        head_block = int(ref["hb"] or 26_500_000)
-        head_ts    = ref["ht"] or datetime.now(UTC)
-        min_block  = head_block - days * 7200
+        async with pool.acquire() as conn:
+            ref = await conn.fetchrow(
+                "SELECT MAX(snapshot_block) AS hb, MAX(snapshot_ts) AS ht FROM user_positions"
+            )
+            head_block = int(ref["hb"] or 26_500_000)
+            head_ts    = ref["ht"] or datetime.now(UTC)
+            min_block  = head_block - days * 7200
 
-        rows = await conn.fetch("""
-            WITH ref(hb, ht) AS (VALUES ($1::bigint, $2::timestamptz))
-            SELECT
-                date_trunc('day', ht - ((hb - l.block_number) * interval '12 seconds')) AS day,
-                l.collateral_asset,
-                COUNT(*)               AS cnt,
-                SUM(l.debt_to_cover)   AS total_debt
-            FROM aave_liquidation_events l, ref
-            WHERE l.block_number >= $3
-            GROUP BY day, l.collateral_asset
-            ORDER BY day
-        """, head_block, head_ts, min_block)
+            rows = await conn.fetch("""
+                WITH ref(hb, ht) AS (VALUES ($1::bigint, $2::timestamptz))
+                SELECT
+                    date_trunc('day', ht - ((hb - l.block_number) * interval '12 seconds')) AS day,
+                    l.collateral_asset,
+                    COUNT(*)               AS cnt,
+                    SUM(l.debt_to_cover)   AS total_debt
+                FROM aave_liquidation_events l, ref
+                WHERE l.block_number >= $3
+                GROUP BY day, l.collateral_asset
+                ORDER BY day
+            """, head_block, head_ts, min_block)
 
-    day_map: dict[str, dict[str, Any]] = {}
-    assets_seen: set[str] = set()
-    for r in rows:
-        d    = str(r["day"].date())
-        sym  = sym_map.get(r["collateral_asset"].lower(), r["collateral_asset"][:8])
-        assets_seen.add(sym)
-        if d not in day_map:
-            day_map[d] = {"day": d}
-        day_map[d][sym] = day_map[d].get(sym, 0) + int(r["cnt"])
+        day_map: dict[str, dict[str, Any]] = {}
+        assets_seen: set[str] = set()
+        for r in rows:
+            d    = str(r["day"].date())
+            sym  = sym_map.get(r["collateral_asset"].lower(), r["collateral_asset"][:8])
+            assets_seen.add(sym)
+            if d not in day_map:
+                day_map[d] = {"day": d}
+            day_map[d][sym] = day_map[d].get(sym, 0) + int(r["cnt"])
 
-    return {
-        "days":   sorted(day_map.values(), key=lambda x: x["day"]),
-        "assets": sorted(assets_seen),
-    }
+        return {
+            "days":   sorted(day_map.values(), key=lambda x: x["day"]),
+            "assets": sorted(assets_seen),
+        }
+
+    return await _cached(f"liquidations_history_{days}", 300.0, _fetch)
 
 
 @app.get("/liquidations/recent")
 async def liquidations_recent(limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
-    pool = get_pool()
-    assets_cfg = load_assets_config()
-    sym_map = _sym_map(assets_cfg)
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        assets_cfg = load_assets_config()
+        sym_map = _sym_map(assets_cfg)
 
-    async with pool.acquire() as conn:
-        ref = await conn.fetchrow(
-            "SELECT MAX(snapshot_block) AS hb, MAX(snapshot_ts) AS ht FROM user_positions"
-        )
-        head_block = int(ref["hb"] or 26_500_000)
-        head_ts    = ref["ht"] or datetime.now(UTC)
+        async with pool.acquire() as conn:
+            ref = await conn.fetchrow(
+                "SELECT MAX(snapshot_block) AS hb, MAX(snapshot_ts) AS ht FROM user_positions"
+            )
+            head_block = int(ref["hb"] or 26_500_000)
+            head_ts    = ref["ht"] or datetime.now(UTC)
 
-        rows = await conn.fetch("""
-            WITH ref(hb, ht) AS (VALUES ($1::bigint, $2::timestamptz))
-            SELECT
-                l.block_number, l.tx_hash, l.collateral_asset, l.debt_asset,
-                l."user", l.debt_to_cover, l.liquidated_collateral,
-                l.liquidator, l.receive_atoken,
-                (ht - ((hb - l.block_number) * interval '12 seconds')) AS approx_ts
-            FROM aave_liquidation_events l, ref
-            ORDER BY l.block_number DESC
-            LIMIT $3
-        """, head_block, head_ts, limit)
+            rows = await conn.fetch("""
+                WITH ref(hb, ht) AS (VALUES ($1::bigint, $2::timestamptz))
+                SELECT
+                    l.block_number, l.tx_hash, l.collateral_asset, l.debt_asset,
+                    l."user", l.debt_to_cover, l.liquidated_collateral,
+                    l.liquidator, l.receive_atoken,
+                    (ht - ((hb - l.block_number) * interval '12 seconds')) AS approx_ts
+                FROM aave_liquidation_events l, ref
+                ORDER BY l.block_number DESC
+                LIMIT $3
+            """, head_block, head_ts, limit)
 
-    items = []
-    for r in rows:
-        items.append({
-            "block_number":        int(r["block_number"]),
-            "tx_hash":             r["tx_hash"],
-            "collateral_asset":    sym_map.get(r["collateral_asset"].lower(), r["collateral_asset"][:10]),
-            "debt_asset":          sym_map.get(r["debt_asset"].lower(), r["debt_asset"][:10]),
-            "user":                r["user"],
-            "debt_to_cover":       _fmt(r["debt_to_cover"]),
-            "liquidated_collateral": _fmt(r["liquidated_collateral"]),
-            "liquidator":          r["liquidator"],
-            "timestamp":           r["approx_ts"].isoformat() if r["approx_ts"] else "",
-        })
-    return {"liquidations": items}
+        items = []
+        for r in rows:
+            items.append({
+                "block_number":          int(r["block_number"]),
+                "tx_hash":               r["tx_hash"],
+                "collateral_asset":      sym_map.get(r["collateral_asset"].lower(), r["collateral_asset"][:10]),
+                "debt_asset":            sym_map.get(r["debt_asset"].lower(), r["debt_asset"][:10]),
+                "user":                  r["user"],
+                "debt_to_cover":         _fmt(r["debt_to_cover"]),
+                "liquidated_collateral": _fmt(r["liquidated_collateral"]),
+                "liquidator":            r["liquidator"],
+                "timestamp":             r["approx_ts"].isoformat() if r["approx_ts"] else "",
+            })
+        return {"liquidations": items}
+
+    return await _cached(f"liquidations_recent_{limit}", 30.0, _fetch)
 
 
 # ── Wallets ───────────────────────────────────────────────────────────────────
 
 @app.get("/wallets/top-borrowers")
 async def top_borrowers(limit: int = Query(20, ge=5, le=100)) -> dict[str, Any]:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT "user", total_collateral_base/1e8 AS supply_usd,
-                   total_debt_base/1e8 AS borrow_usd,
-                   health_factor, emode_category, ltv
-            FROM user_positions
-            WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
-              AND total_debt_base > 0 AND health_factor < 999
-            ORDER BY total_debt_base DESC
-            LIMIT $1
-        """, limit)
-    return {
-        "wallets": [
-            {
-                "user":        r["user"],
-                "supply_usd":  _fmt(r["supply_usd"]),
-                "borrow_usd":  _fmt(r["borrow_usd"]),
-                "health_factor": _fmt(r["health_factor"]),
-                "emode":       int(r["emode_category"]),
-                "ltv":         _fmt(r["ltv"]) / 100,
-            }
-            for r in rows
-        ]
-    }
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT "user", total_collateral_base/1e8 AS supply_usd,
+                       total_debt_base/1e8 AS borrow_usd,
+                       health_factor, emode_category, ltv
+                FROM user_positions
+                WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
+                  AND total_debt_base > 0 AND health_factor < 999
+                ORDER BY total_debt_base DESC
+                LIMIT $1
+            """, limit)
+        return {
+            "wallets": [
+                {
+                    "user":          r["user"],
+                    "supply_usd":    _fmt(r["supply_usd"]),
+                    "borrow_usd":    _fmt(r["borrow_usd"]),
+                    "health_factor": _fmt(r["health_factor"]),
+                    "emode":         int(r["emode_category"]),
+                    "ltv":           _fmt(r["ltv"]) / 100,
+                }
+                for r in rows
+            ]
+        }
+    return await _cached(f"top_borrowers_{limit}", 60.0, _fetch)
 
 
 @app.get("/wallets/top-suppliers")
 async def top_suppliers(limit: int = Query(20, ge=5, le=100)) -> dict[str, Any]:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT "user", total_collateral_base/1e8 AS supply_usd,
-                   total_debt_base/1e8 AS borrow_usd,
-                   health_factor, emode_category
-            FROM user_positions
-            WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
-              AND total_collateral_base > 0 AND health_factor < 999
-            ORDER BY total_collateral_base DESC
-            LIMIT $1
-        """, limit)
-    return {
-        "wallets": [
-            {
-                "user":        r["user"],
-                "supply_usd":  _fmt(r["supply_usd"]),
-                "borrow_usd":  _fmt(r["borrow_usd"]),
-                "health_factor": _fmt(r["health_factor"]),
-                "emode":       int(r["emode_category"]),
-            }
-            for r in rows
-        ]
-    }
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT "user", total_collateral_base/1e8 AS supply_usd,
+                       total_debt_base/1e8 AS borrow_usd,
+                       health_factor, emode_category
+                FROM user_positions
+                WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
+                  AND total_collateral_base > 0 AND health_factor < 999
+                ORDER BY total_collateral_base DESC
+                LIMIT $1
+            """, limit)
+        return {
+            "wallets": [
+                {
+                    "user":          r["user"],
+                    "supply_usd":    _fmt(r["supply_usd"]),
+                    "borrow_usd":    _fmt(r["borrow_usd"]),
+                    "health_factor": _fmt(r["health_factor"]),
+                    "emode":         int(r["emode_category"]),
+                }
+                for r in rows
+            ]
+        }
+    return await _cached(f"top_suppliers_{limit}", 60.0, _fetch)
 
 
 @app.get("/wallets/hf-distribution")
 async def hf_distribution() -> dict[str, Any]:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT
-                CASE
-                    WHEN health_factor < 1.0  THEN '<1.0 (Liquidatable)'
-                    WHEN health_factor < 1.05 THEN '1.0–1.05 (Danger)'
-                    WHEN health_factor < 1.1  THEN '1.05–1.1 (High Risk)'
-                    WHEN health_factor < 1.25 THEN '1.1–1.25 (Elevated)'
-                    WHEN health_factor < 1.5  THEN '1.25–1.5 (Moderate)'
-                    WHEN health_factor < 2.0  THEN '1.5–2.0 (Healthy)'
-                    ELSE '>2.0 (Safe)'
-                END AS band,
-                COUNT(*) AS count,
-                SUM(total_debt_base)/1e8 AS debt_usd
-            FROM user_positions
-            WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
-              AND total_debt_base > 0 AND health_factor < 999
-            GROUP BY band
-            ORDER BY MIN(health_factor)
-        """)
-    return {
-        "bands": [
-            {"band": r["band"], "count": int(r["count"]), "debt_usd": _fmt(r["debt_usd"])}
-            for r in rows
-        ]
-    }
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT
+                    CASE
+                        WHEN health_factor < 1.0  THEN '<1.0 (Liquidatable)'
+                        WHEN health_factor < 1.05 THEN '1.0–1.05 (Danger)'
+                        WHEN health_factor < 1.1  THEN '1.05–1.1 (High Risk)'
+                        WHEN health_factor < 1.25 THEN '1.1–1.25 (Elevated)'
+                        WHEN health_factor < 1.5  THEN '1.25–1.5 (Moderate)'
+                        WHEN health_factor < 2.0  THEN '1.5–2.0 (Healthy)'
+                        ELSE '>2.0 (Safe)'
+                    END AS band,
+                    COUNT(*) AS count,
+                    SUM(total_debt_base)/1e8 AS debt_usd
+                FROM user_positions
+                WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
+                  AND total_debt_base > 0 AND health_factor < 999
+                GROUP BY band
+                ORDER BY MIN(health_factor)
+            """)
+        return {
+            "bands": [
+                {"band": r["band"], "count": int(r["count"]), "debt_usd": _fmt(r["debt_usd"])}
+                for r in rows
+            ]
+        }
+    return await _cached("hf_distribution", 60.0, _fetch)
 
 
 @app.get("/wallets/emode-distribution")
 async def emode_distribution() -> dict[str, Any]:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT emode_category, COUNT(*) AS count,
-                   SUM(total_collateral_base)/1e8 AS supply_usd,
-                   SUM(total_debt_base)/1e8 AS borrow_usd
-            FROM user_positions
-            WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
-              AND health_factor < 999
-            GROUP BY emode_category
-            ORDER BY emode_category
-        """)
-    labels = {0: "No E-Mode", 1: "ETH Correlated", 2: "Stablecoins"}
-    return {
-        "emodes": [
-            {
-                "category": int(r["emode_category"]),
-                "label":    labels.get(int(r["emode_category"]), f"E-Mode {r['emode_category']}"),
-                "count":    int(r["count"]),
-                "supply_usd": _fmt(r["supply_usd"]),
-                "borrow_usd": _fmt(r["borrow_usd"]),
-            }
-            for r in rows
-        ]
-    }
+    async def _fetch() -> dict[str, Any]:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT emode_category, COUNT(*) AS count,
+                       SUM(total_collateral_base)/1e8 AS supply_usd,
+                       SUM(total_debt_base)/1e8 AS borrow_usd
+                FROM user_positions
+                WHERE snapshot_block = (SELECT MAX(snapshot_block) FROM user_positions)
+                  AND health_factor < 999
+                GROUP BY emode_category
+                ORDER BY emode_category
+            """)
+        labels = {0: "No E-Mode", 1: "ETH Correlated", 2: "Stablecoins"}
+        return {
+            "emodes": [
+                {
+                    "category":   int(r["emode_category"]),
+                    "label":      labels.get(int(r["emode_category"]), f"E-Mode {r['emode_category']}"),
+                    "count":      int(r["count"]),
+                    "supply_usd": _fmt(r["supply_usd"]),
+                    "borrow_usd": _fmt(r["borrow_usd"]),
+                }
+                for r in rows
+            ]
+        }
+    return await _cached("emode_distribution", 60.0, _fetch)
 
 
 # ── Activity feed ─────────────────────────────────────────────────────────────
@@ -865,23 +911,26 @@ async def signals_latest() -> SignalsResponse:
 
 @app.get("/alerts", response_model=AlertsResponse)
 async def alerts(since: datetime | None = None) -> AlertsResponse:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        if since:
-            rows = await conn.fetch(
-                "SELECT * FROM alerts WHERE ts >= $1 ORDER BY ts DESC LIMIT 200", since
+    cache_key = f"alerts_{since.isoformat() if since else 'all'}"
+    async def _fetch() -> AlertsResponse:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            if since:
+                rows = await conn.fetch(
+                    "SELECT * FROM alerts WHERE ts >= $1 ORDER BY ts DESC LIMIT 200", since
+                )
+            else:
+                rows = await conn.fetch("SELECT * FROM alerts ORDER BY ts DESC LIMIT 200")
+        items = [
+            AlertItem(
+                id=r["id"], signal=r["signal"], asset=r["asset"], scenario=r["scenario"],
+                severity=r["severity"], message=r["message"], block=r["block"],
+                ts=r["ts"], resolved_at=r["resolved_at"],
             )
-        else:
-            rows = await conn.fetch("SELECT * FROM alerts ORDER BY ts DESC LIMIT 200")
-    items = [
-        AlertItem(
-            id=r["id"], signal=r["signal"], asset=r["asset"], scenario=r["scenario"],
-            severity=r["severity"], message=r["message"], block=r["block"],
-            ts=r["ts"], resolved_at=r["resolved_at"],
-        )
-        for r in rows
-    ]
-    return AlertsResponse(alerts=items)
+            for r in rows
+        ]
+        return AlertsResponse(alerts=items)
+    return await _cached(cache_key, 30.0, _fetch)
 
 
 @app.get("/backtest/summary", response_model=BacktestResponse)
@@ -945,11 +994,10 @@ _WETH_PROXY = "0x5424384B256154046E9667dDFaaa5e550145215e"
 
 @app.get("/svr/stats")
 async def svr_stats() -> dict[str, Any]:
-    async def _fetch() -> dict[str, Any]:
-        import datetime as dt
+    import datetime as dt
 
-        pool = get_pool()
-        sym_map = _sym_map(load_assets_config())
+    pool = get_pool()
+    sym_map = _sym_map(load_assets_config())
     async with pool.acquire() as conn:
         head = await conn.fetchval("SELECT MAX(snapshot_block) FROM oracle_prices") or 0
         head_block = await conn.fetchval("SELECT MAX(block_number) FROM indexer_cursor") or 0
@@ -1216,5 +1264,4 @@ async def svr_stats() -> dict[str, Any]:
         "daily_bonus": day_entries,
         "daily_assets": assets_seen,
         "snapshot_block": head,
-        }
-    return await _cached("svr_stats", 120.0, _fetch)
+    }
